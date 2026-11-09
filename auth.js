@@ -53,7 +53,7 @@ const Auth = (() => {
     // alte Einträge desselben Benutzers (z. B. nach Umbenennung) entfernen
     for (const [k, v] of Object.entries(c)) if (v.uid === member.uid) delete c[k];
     c[nameKey(member.name)] = { uid: member.uid, name: member.name, perms: member.perms, active: member.active !== false,
-      email: member.email, verifier };
+      approved: !!member.approved, email: member.email, verifier };
     localStorage.setItem(LS_CACHE, JSON.stringify(c));
   }
 
@@ -69,7 +69,7 @@ const Auth = (() => {
     const uid = sessionStorage.getItem(UI_KEY) || localStorage.getItem(UI_KEY);
     if (!uid) { current = null; return null; }
     const m = Object.values(cache()).find(x => x.uid === uid && x.active);
-    current = m ? { uid: m.uid, name: m.name, perms: m.perms, active: true, email: m.email } : null;
+    current = m ? { uid: m.uid, name: m.name, perms: m.perms, active: true, approved: !!m.approved, email: m.email } : null;
     if (!current) logout();
     return current;
   }
@@ -103,8 +103,9 @@ const Auth = (() => {
     if (!current) return;
     const m = await FB.getDoc('members', current.uid, tok);
     if (!m || m.active === false) { logout(); window.dispatchEvent(new CustomEvent('auth-revoked')); return; }
-    const updated = { ...current, name: m.name, perms: m.perms || [] };
-    const permsChanged = JSON.stringify(updated.perms) !== JSON.stringify(current.perms) || updated.name !== current.name;
+    const updated = { ...current, name: m.name, perms: m.perms || [], approved: !!m.approved };
+    const permsChanged = JSON.stringify(updated.perms) !== JSON.stringify(current.perms) || updated.name !== current.name
+      || updated.approved !== !!current.approved;
     current = updated;
     await cacheMember(updated);
     if (permsChanged) window.dispatchEvent(new CustomEvent('auth-changed'));
@@ -133,7 +134,7 @@ const Auth = (() => {
         const m = await FB.getDoc('members', s.uid, s.idToken);
         if (!m || m.active === false) return { error: 'Dieses Konto ist gesperrt oder wurde gelöscht.' };
         saveAuth(s);
-        const member = { uid: s.uid, name: m.name, perms: m.perms || [], active: true, email: lg.email };
+        const member = { uid: s.uid, name: m.name, perms: m.perms || [], active: true, approved: !!m.approved, email: lg.email };
         await cacheMember(member, password);
         memoryPassword = null;
         startSession(member, persist);
@@ -160,7 +161,7 @@ const Auth = (() => {
     const s = await FB.signUp(email, password);
     const now = new Date().toISOString();
     await FB.commit([
-      { coll: 'members', id: s.uid, data: { name, perms: ['admin'], active: true, createdAt: now } },
+      { coll: 'members', id: s.uid, data: { name, perms: ['admin'], active: true, approved: true, createdAt: now } },
       { coll: 'logins', id: nameKey(name), data: { email, uid: s.uid, name } },
       { coll: 'config', id: 'setup', data: { createdAt: now, by: s.uid } },
     ], s.idToken);
@@ -172,7 +173,9 @@ const Auth = (() => {
   }
 
   // ---------- Admin-Funktionen (brauchen Internet) ----------
-  const memberData = m => ({ name: m.name, perms: m.perms || [], active: m.active !== false, createdAt: m.createdAt || new Date().toISOString() });
+  // approved: wurde vom Admin schon einmal freigegeben (bleibt gesetzt, auch wenn Rechte später entfernt werden)
+  const memberData = m => ({ name: m.name, perms: m.perms || [], active: m.active !== false, approved: !!m.approved,
+    createdAt: m.createdAt || new Date().toISOString() });
 
   async function listMembers() {
     const list = await FB.query('members', {}, await token());
@@ -201,10 +204,16 @@ const Auth = (() => {
     return { user: member };
   }
   // Konto wartet auf Freigabe: hat noch keines der Rechte außer „einstellungen“
-  const isWaiting = u => !!u && !(u.perms || []).some(p => p !== 'einstellungen');
+  // Nur wirklich neue Konten: noch nie freigegeben und (noch) keine Rechte außer „einstellungen“.
+  // Ältere Konten ohne Merker, die schon Rechte haben, gelten als freigegeben.
+  const hasRealPerms = u => (u.perms || []).some(p => p !== 'einstellungen');
+  const isWaiting = u => !!u && !u.approved && !hasRealPerms(u);
 
   async function updateMember(m, changes) {
-    await FB.commit([{ coll: 'members', id: m.uid, data: memberData({ ...m, ...changes }) }], await token());
+    const next = { ...m, ...changes };
+    // Sobald einmal echte Rechte vergeben wurden, gilt das Konto dauerhaft als freigegeben
+    next.approved = !!next.approved || hasRealPerms(m) || hasRealPerms(next);
+    await FB.commit([{ coll: 'members', id: m.uid, data: memberData(next) }], await token());
   }
 
   async function deleteMember(m) {

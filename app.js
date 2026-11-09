@@ -69,8 +69,10 @@ function downloadCsv(filename, header, rows) {
 }
 
 // ---------- Startseite ----------
-function renderHome() {
+async function renderHome() {
   setTitle('Vereinsorga');
+  // Widget „Nächste Termine“ für alle, die den Kalender sehen dürfen
+  const widget = Auth.can('kalender') || Auth.can('kalender_bearbeiten') ? await upcomingWidget() : null;
   view.innerHTML = `
     <p class="greeting">Hallo <strong>${esc(Auth.user().name)}</strong>!</p>
     ${Auth.isWaiting(Auth.user()) ? `
@@ -78,6 +80,10 @@ function renderHome() {
         <h2>⏳ Dein Konto wartet auf Freigabe</h2>
         <p class="muted" style="margin:0">Ein Admin muss dir erst die Bereiche freigeben, die du nutzen darfst.
         Sobald das passiert ist, erscheinen sie hier automatisch (mit Internet nach spätestens 30 Sekunden).</p>
+      </div>` : !MODULES.some(m => m.perms && !m.perms.includes('einstellungen') && canAny(m.perms)) ? `
+      <div class="card">
+        <h2>Keine Bereiche freigegeben</h2>
+        <p class="muted" style="margin:0">Dir sind im Moment keine Bereiche freigegeben. Wende dich bei Bedarf an einen Admin.</p>
       </div>` : ''}
     <div class="tiles">
       ${MODULES.filter(m => canAny(m.perms)).map(m => `
@@ -87,6 +93,7 @@ function renderHome() {
           <small>${esc(m.desc)}</small>
         </a>`).join('')}
     </div>
+    ${widget ? widget.html : ''}
     ${localStorage.getItem('deviceName') || !Auth.can('einstellungen') ? '' : `
       <div class="card" style="margin-top:14px">
         <h2>Tipp</h2>
@@ -94,6 +101,7 @@ function renderHome() {
         damit man später sieht, wo ein Eintrag erfasst wurde.</p>
       </div>`}
   `;
+  if (widget) widget.bind(view);
 }
 
 // =====================================================================
@@ -1316,6 +1324,7 @@ async function renderAdmin() {
             ${Auth.isWaiting(u) && u.active !== false ? '<span class="tag new">wartet auf Freigabe</span>' : ''}
             ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}
             ${u.createdAt ? `<div class="bill-sub" style="color:var(--muted)">erstellt ${dateTime(u.createdAt)}</div>` : ''}</div>
+          ${Auth.isWaiting(u) && u.active !== false ? '<button class="btn small" data-act="known" title="Hinweis entfernen, ohne Rechte zu vergeben">Ist bekannt</button>' : ''}
           <button class="btn small" data-act="pw">Passwort neu setzen</button>
           ${u.uid !== me.uid ? `
             <button class="btn small" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
@@ -1366,6 +1375,10 @@ async function renderAdmin() {
       if (u.uid === me.uid) { await Sync.run(); if (losesAdmin) return go('#/'); }
       renderAdmin();
     }));
+
+    card.querySelector('[data-act="known"]')?.addEventListener('click', async ev => {
+      if (await act(() => Auth.updateMember(u, { approved: true }), `${u.name} ist jetzt als bekannt markiert`, ev.currentTarget)) renderAdmin();
+    });
 
     card.querySelector('[data-act="pw"]').addEventListener('click', async ev => {
       const pw = prompt(`Neues Passwort für ${u.name} (mind. ${Auth.MIN_PASSWORD} Zeichen):`);

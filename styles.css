@@ -237,6 +237,11 @@ main:has(.cal-grid) { max-width: 1200px; }
 .cal-bar { width: 5px; align-self: stretch; border-radius: 3px; background: var(--c); flex: none; }
 .cal-item .grow strong { display: block; }
 .cal-item .grow .muted { font-size: 14px; }
+.upcoming { margin-top: 14px; }
+.upcoming .card-head { flex-wrap: wrap; }
+.up-date { display: block; font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.up-date.is-today { color: var(--primary); }
+.upcoming-item .grow strong, .upcoming-item .grow .muted { display: block; overflow-wrap: anywhere; }
 .cal-desc { white-space: pre-wrap; background: var(--bg); border-radius: 10px; padding: 10px 12px; }
 
 /* Dialogfenster */

@@ -240,6 +240,72 @@ async function renderKalender() {
   }
 }
 
+// ---------- Startseiten-Widget: nächste Termine ----------
+const UPCOMING_DAYS = 90;   // so weit in die Zukunft schauen
+const UPCOMING_MAX = 6;     // so viele Termine anzeigen
+
+async function upcomingWidget() {
+  const { cats, events } = await loadCalendar();
+  const catMap = new Map(cats.map(c => [c.id, c]));
+  const today = Cal.todayKey();
+  const tomorrow = Cal.addDays(today, 1);
+  const until = Cal.addDays(today, UPCOMING_DAYS);
+  const now = new Date();
+  const nowTime = `${Cal.pad(now.getHours())}:${Cal.pad(now.getMinutes())}`;
+
+  const list = [];
+  for (const ev of events) {
+    const dur = Math.max(0, Cal.diffDays(ev.start, ev.end || ev.start));
+    for (const occ of Cal.occurrences(ev, today, until)) {
+      const endDay = Cal.addDays(occ, dur);
+      // heute schon vorbei? (Endzeit überschritten)
+      if (endDay === today && !ev.allDay && (ev.endTime || ev.startTime) && (ev.endTime || ev.startTime) < nowTime) continue;
+      list.push({ ev, occ, endDay, running: occ < today });
+    }
+  }
+  list.sort((a, b) => (a.running ? today : a.occ).localeCompare(b.running ? today : b.occ)
+    || (b.ev.allDay - a.ev.allDay) || String(a.ev.startTime).localeCompare(String(b.ev.startTime)));
+  const shown = list.slice(0, UPCOMING_MAX);
+
+  const dayLabel = k => k === today ? 'Heute' : k === tomorrow ? 'Morgen' : Cal.shortDate(k);
+  const html = `
+    <div class="card upcoming">
+      <div class="card-head">
+        <h2>📅 Nächste Termine</h2>
+        <a class="btn small" href="#/kalender">Zum Kalender</a>
+      </div>
+      ${shown.length ? `<ul class="list">${shown.map((x, i) => {
+        const cat = catMap.get(x.ev.categoryId);
+        const when = x.running ? `läuft bis ${dayLabel(x.endDay)}`
+          : x.endDay !== x.occ ? `${dayLabel(x.occ)} – ${dayLabel(x.endDay)}`
+          : dayLabel(x.occ);
+        return `
+          <li class="cal-item upcoming-item" data-i="${i}">
+            <span class="cal-bar" style="--c:${cat?.color || '#8a96a3'}"></span>
+            <span class="grow">
+              <span class="up-date ${x.occ === today || x.running ? 'is-today' : ''}">${esc(when)}</span>
+              <strong>${esc(x.ev.title)}</strong>
+              <span class="muted">${timeText(x.ev)}${x.ev.location ? ' · ' + esc(x.ev.location) : ''}</span></span>
+            <span class="muted">›</span>
+          </li>`;
+      }).join('')}</ul>
+      ${list.length > shown.length ? `<p class="muted" style="margin:8px 0 0;font-size:14px">… und ${list.length - shown.length} weitere in den nächsten ${UPCOMING_DAYS} Tagen</p>` : ''}`
+      : `<p class="muted" style="margin:0">In den nächsten ${UPCOMING_DAYS} Tagen stehen keine Termine an.</p>`}
+    </div>`;
+
+  // Klick: Kalender mit diesem Tag öffnen
+  const bind = root => root.querySelectorAll('.upcoming-item').forEach(li => li.addEventListener('click', () => {
+    const x = shown[+li.dataset.i];
+    const day = x.running ? today : x.occ;
+    calState.selected = day;
+    calState.month = day.slice(0, 7);
+    sessionStorage.setItem('calSel', day);
+    sessionStorage.setItem('calMonth', calState.month);
+    location.hash = '#/kalender';
+  }));
+  return { html, bind };
+}
+
 // ---------- Dialog-Fenster ----------
 function openModal(html, { onClose } = {}) {
   closeModal();
