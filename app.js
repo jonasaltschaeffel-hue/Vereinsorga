@@ -1030,29 +1030,356 @@ async function renderEinstellungen() {
   });
 }
 
+// ---------- Anmeldung, Erst-Einrichtung, Notfall-Code ----------
+const userBtn = document.getElementById('userBtn');
+
+// Navigiert zu einer Seite; ist sie schon offen, wird sie neu aufgebaut.
+function go(hash) {
+  if (location.hash === hash) route(); else location.hash = hash;
+}
+
+function updateUserBtn() {
+  const u = Auth.user();
+  userBtn.hidden = !u;
+  if (u) userBtn.textContent = '👤 ' + u.name;
+}
+userBtn.addEventListener('click', () => {
+  if (!confirm(`${Auth.user().name} abmelden?`)) return;
+  Auth.logout();
+  go('#/');
+});
+
+function authShell(inner) {
+  setTitle('Vereinsorga');
+  view.innerHTML = `<div class="auth-wrap"><div class="card auth-card">
+    <img class="auth-logo" src="icon.svg" alt="" width="56" height="56">${inner}</div></div>`;
+}
+
+function pwField(id, label, autocomplete) {
+  return `<label for="${id}">${label}</label>
+    <div class="pw-wrap"><input id="${id}" type="password" autocomplete="${autocomplete}" required>
+      <button type="button" class="pw-toggle" data-toggle="${id}" aria-label="Passwort anzeigen">👁</button></div>`;
+}
+
+function bindPwToggles() {
+  view.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
+    const input = document.getElementById(b.dataset.toggle);
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }));
+}
+
+function formError(msg) {
+  const e = view.querySelector('.form-error');
+  e.textContent = msg;
+  e.hidden = !msg;
+}
+
+const passwordProblem = (pw, pw2) =>
+  pw.length < Auth.MIN_PASSWORD ? `Das Passwort braucht mindestens ${Auth.MIN_PASSWORD} Zeichen.`
+  : pw2 !== undefined && pw !== pw2 ? 'Die beiden Passwörter stimmen nicht überein.' : '';
+
+async function importBackupFile(file) {
+  const data = JSON.parse(await file.text());
+  if (data.app !== 'vereinsorga' || !Array.isArray(data.records)) throw new Error('Keine Vereinsorga-Sicherung');
+  return DB.merge(data.records);
+}
+
+function renderNoCrypto() {
+  authShell(`<h2>Sichere Verbindung nötig</h2>
+    <p>Die Anmeldung funktioniert nur, wenn die App über <strong>https://</strong> (online) oder über
+    <strong>http://localhost</strong> (auf dem PC) geöffnet wird.</p>`);
+}
+
+function renderSetup() {
+  authShell(`
+    <h2>Willkommen!</h2>
+    <p class="muted">Lege das erste Konto an. Es bekommt automatisch Admin-Rechte – damit kannst du danach
+    weitere Benutzer anlegen und Rechte vergeben.</p>
+    <form id="setupForm">
+      <label for="sName">Name</label><input id="sName" autocomplete="username" required>
+      ${pwField('sPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}
+      ${pwField('sPw2', 'Passwort wiederholen', 'new-password')}
+      <p class="form-error" hidden></p>
+      <button class="btn primary wide" type="submit">Admin-Konto anlegen</button>
+    </form>
+    <div class="auth-alt">
+      <p class="muted">Benutzer schon auf einem anderen Gerät angelegt? Dann dort eine Sicherung exportieren und hier importieren.</p>
+      <label class="btn wide">Sicherung importieren<input type="file" id="setupImport" accept=".json,application/json" hidden></label>
+    </div>`);
+  bindPwToggles();
+  document.getElementById('setupForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const name = document.getElementById('sName').value.trim();
+    const pw = document.getElementById('sPw').value;
+    const problem = !name ? 'Bitte einen Namen eingeben.' : passwordProblem(pw, document.getElementById('sPw2').value);
+    if (problem) return formError(problem);
+    ev.submitter && (ev.submitter.disabled = true);
+    const user = await Auth.createUser(name, pw, ['admin']);
+    Auth.signIn(user, false);
+    const code = Auth.newRecoveryCode();
+    await Auth.setRecoveryCode(code);
+    renderRecoveryCode(code);
+  });
+  document.getElementById('setupImport').addEventListener('change', async ev => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    try {
+      const { added, updated } = await importBackupFile(file);
+      const hasUsers = (await DB.all('user')).length > 0;
+      toast(hasUsers ? `Sicherung importiert (${added} neu, ${updated} aktualisiert) – bitte anmelden` : 'Die Sicherung enthält keine Benutzer.');
+      route();
+    } catch (e) { alert('Import fehlgeschlagen: ' + e.message); }
+  });
+}
+
+function renderRecoveryCode(code) {
+  updateUserBtn();
+  authShell(`
+    <h2>Dein Notfall-Code</h2>
+    <p>Mit diesem Code kann ein Admin-Passwort zurückgesetzt werden, falls es vergessen wird.
+    <strong>Schreib ihn auf und bewahre ihn sicher auf</strong> – er wird nur jetzt angezeigt.</p>
+    <div class="code-box">${code}</div>
+    <label class="check"><input type="checkbox" id="noted"> Ich habe den Code notiert</label>
+    <button class="btn primary wide" id="codeDone" disabled>Weiter</button>`);
+  document.getElementById('noted').addEventListener('change', ev => {
+    document.getElementById('codeDone').disabled = !ev.target.checked;
+  });
+  document.getElementById('codeDone').addEventListener('click', () => go('#/'));
+}
+
+function renderLogin() {
+  authShell(`
+    <h2>Anmelden</h2>
+    <form id="loginForm">
+      <label for="lName">Name</label><input id="lName" autocomplete="username" required>
+      ${pwField('lPw', 'Passwort', 'current-password')}
+      <label class="check"><input type="checkbox" id="lKeep"> Angemeldet bleiben</label>
+      <p class="muted hint">Nur auf eigenen Geräten ankreuzen, nicht am gemeinsamen Ausgabe-iPad.</p>
+      <p class="form-error" hidden></p>
+      <button class="btn primary wide" type="submit">Anmelden</button>
+    </form>
+    <button class="link-btn" id="forgot" type="button">Passwort vergessen?</button>`);
+  bindPwToggles();
+  document.getElementById('lName').focus();
+  document.getElementById('loginForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const btn = ev.submitter;
+    if (btn) { btn.disabled = true; btn.textContent = 'Prüfe …'; }
+    const user = await Auth.login(document.getElementById('lName').value, document.getElementById('lPw').value,
+      document.getElementById('lKeep').checked);
+    if (!user) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Anmelden'; }
+      document.getElementById('lPw').value = '';
+      return formError('Name oder Passwort falsch – oder das Konto ist gesperrt.');
+    }
+    route();
+  });
+  document.getElementById('forgot').addEventListener('click', renderForgot);
+}
+
+function renderForgot() {
+  authShell(`
+    <h2>Passwort vergessen</h2>
+    <p class="muted">Benutzer: Bitte einen Admin, dein Passwort neu zu setzen.<br>
+    Admins: Mit dem Notfall-Code kannst du hier ein neues Passwort setzen.</p>
+    <form id="forgotForm">
+      <label for="fCode">Notfall-Code</label><input id="fCode" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" required>
+      <label for="fName">Name des Admin-Kontos</label><input id="fName" autocomplete="username" required>
+      ${pwField('fPw', 'Neues Passwort', 'new-password')}
+      ${pwField('fPw2', 'Neues Passwort wiederholen', 'new-password')}
+      <p class="form-error" hidden></p>
+      <button class="btn primary wide" type="submit">Passwort zurücksetzen</button>
+    </form>
+    <button class="link-btn" id="back" type="button">Zurück zur Anmeldung</button>`);
+  bindPwToggles();
+  document.getElementById('back').addEventListener('click', renderLogin);
+  document.getElementById('forgotForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const pw = document.getElementById('fPw').value;
+    const problem = passwordProblem(pw, document.getElementById('fPw2').value);
+    if (problem) return formError(problem);
+    if (!await Auth.checkRecoveryCode(document.getElementById('fCode').value)) return formError('Der Notfall-Code stimmt nicht.');
+    const user = await Auth.findByName(document.getElementById('fName').value);
+    if (!user || !(user.perms || []).includes('admin')) return formError('Es gibt kein Admin-Konto mit diesem Namen.');
+    await Auth.setPassword({ ...user, active: true }, pw);
+    toast('Passwort geändert – bitte anmelden');
+    renderLogin();
+  });
+}
+
+// ---------- Admin: Benutzer & Rechte ----------
+async function renderAdmin() {
+  setTitle('Admin', '#/');
+  const users = await Auth.users();
+  const me = Auth.user();
+  const permBoxes = (name, perms) => Auth.PERMS.map(([k, l]) => `
+    <label class="check"><input type="checkbox" name="${name}" value="${k}" ${perms.includes(k) ? 'checked' : ''}> ${l}</label>`).join('');
+
+  view.innerHTML = `
+    <div class="card">
+      <h2>Neuer Benutzer</h2>
+      <form id="newUser">
+        <div class="row">
+          <div><label for="nuName">Name</label><input id="nuName" autocomplete="off" required></div>
+          <div>${pwField('nuPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}</div>
+        </div>
+        <p class="muted" style="margin:14px 0 4px">Rechte</p>
+        <div class="perm-grid">${permBoxes('nuPerm', ['ausgabe'])}</div>
+        <p class="form-error" hidden></p>
+        <button class="btn primary" type="submit" style="margin-top:10px">Benutzer anlegen</button>
+      </form>
+    </div>
+    <h2 class="section-title">Benutzer (${users.length})</h2>
+    ${users.map(u => `
+      <div class="card user-card ${u.active === false ? 'locked' : ''}" data-id="${u.id}">
+        <div class="bill-head">
+          <div class="grow"><strong>${esc(u.name)}</strong>
+            ${u.id === me.id ? '<span class="tag">Du</span>' : ''}
+            ${(u.perms || []).includes('admin') ? '<span class="tag">Admin</span>' : ''}
+            ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}</div>
+          <button class="btn small" data-act="pw">Passwort neu setzen</button>
+          ${u.id !== me.id ? `
+            <button class="btn small" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
+            <button class="btn small danger" data-act="del">Löschen</button>` : ''}
+        </div>
+        <div class="perm-grid">${permBoxes('perm', u.perms || [])}</div>
+      </div>`).join('')}
+    <div class="card">
+      <h2>Notfall-Code</h2>
+      <p class="muted">Damit kann ein Admin-Passwort über „Passwort vergessen?“ zurückgesetzt werden.
+      Ein neuer Code macht den bisherigen ungültig.</p>
+      <button class="btn" id="newCode">Neuen Notfall-Code erzeugen</button>
+      <div id="codeOut"></div>
+    </div>
+    <div class="card">
+      <h2>Gut zu wissen</h2>
+      <p class="muted" style="margin:0">Benutzer und Rechte sind auf diesem Gerät gespeichert. Auf andere Geräte kommen sie
+      mit „Sicherung exportieren“ und „Sicherung importieren“ in den Einstellungen. Admins dürfen immer alles.</p>
+    </div>`;
+  bindPwToggles();
+
+  const activeAdmins = () => users.filter(u => Auth.isAdmin(u));
+
+  document.getElementById('newUser').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const name = document.getElementById('nuName').value.trim();
+    const pw = document.getElementById('nuPw').value;
+    const perms = [...view.querySelectorAll('[name="nuPerm"]:checked')].map(c => c.value);
+    const problem = !name ? 'Bitte einen Namen eingeben.'
+      : await Auth.findByName(name) ? `Es gibt schon einen Benutzer „${name}“.`
+      : passwordProblem(pw) || (!perms.length ? 'Bitte mindestens ein Recht auswählen.' : '');
+    if (problem) return formError(problem);
+    await Auth.createUser(name, pw, perms);
+    toast(`Benutzer ${name} angelegt`);
+    renderAdmin();
+  });
+
+  view.querySelectorAll('.user-card').forEach(card => {
+    const u = users.find(x => x.id === card.dataset.id);
+
+    card.querySelectorAll('[name="perm"]').forEach(box => box.addEventListener('change', async () => {
+      const perms = [...card.querySelectorAll('[name="perm"]:checked')].map(c => c.value);
+      const losesAdmin = Auth.isAdmin(u) && !perms.includes('admin');
+      if (losesAdmin && activeAdmins().length <= 1) {
+        box.checked = true;
+        return alert('Es muss immer mindestens einen Admin geben.');
+      }
+      if (losesAdmin && u.id === me.id &&
+        !confirm('Du nimmst dir selbst die Admin-Rechte. Danach kannst du diese Seite nicht mehr öffnen. Fortfahren?')) {
+        box.checked = true;
+        return;
+      }
+      await DB.save('user', { ...u, perms });
+      toast(`Rechte von ${u.name} gespeichert`);
+      if (losesAdmin && u.id === me.id) return go('#/');
+      renderAdmin();
+    }));
+
+    card.querySelector('[data-act="pw"]').addEventListener('click', async () => {
+      const pw = prompt(`Neues Passwort für ${u.name} (mind. ${Auth.MIN_PASSWORD} Zeichen):`);
+      if (pw === null) return;
+      const problem = passwordProblem(pw);
+      if (problem) return alert(problem);
+      await Auth.setPassword(u, pw);
+      toast(`Passwort von ${u.name} geändert`);
+    });
+
+    card.querySelector('[data-act="lock"]')?.addEventListener('click', async () => {
+      const lock = u.active !== false;
+      if (lock && Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
+      await DB.save('user', { ...u, active: !lock });
+      toast(lock ? `${u.name} gesperrt` : `${u.name} entsperrt`);
+      renderAdmin();
+    });
+
+    card.querySelector('[data-act="del"]')?.addEventListener('click', async () => {
+      if (Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
+      if (!confirm(`Benutzer „${u.name}“ löschen? Bereits erfasste Einträge bleiben erhalten.`)) return;
+      await DB.remove(u);
+      toast(`${u.name} gelöscht`);
+      renderAdmin();
+    });
+  });
+
+  document.getElementById('newCode').addEventListener('click', async () => {
+    if (!confirm('Neuen Notfall-Code erzeugen? Der bisherige Code wird damit ungültig.')) return;
+    const code = Auth.newRecoveryCode();
+    await Auth.setRecoveryCode(code);
+    document.getElementById('codeOut').innerHTML = `
+      <p style="margin:12px 0 6px"><strong>Neuer Code – jetzt aufschreiben, er wird nur einmal angezeigt:</strong></p>
+      <div class="code-box">${code}</div>`;
+  });
+}
+
 // ---------- Router ----------
+// perms: Seite ist erreichbar, wenn der Benutzer mindestens eines dieser Rechte hat.
 const ROUTES = {
-  '': renderHome,
-  'getraenke': renderEinrichtung,
-  'getraenke/einrichtung': renderEinrichtung,
-  'getraenke/abrechnung': () => renderAbrechnung(true),
-  'getraenke/bezahlt': renderBezahlt,
-  'getraenke/statistik': renderStatistik,
-  'ausgabe': renderAusgabe,
-  'einstellungen': renderEinstellungen,
+  '': { render: renderHome },
+  'getraenke': { render: renderGetraenkeStart, perms: DRINK_PERMS },
+  'getraenke/einrichtung': { render: renderEinrichtung, perms: ['einrichtung'] },
+  'getraenke/abrechnung': { render: () => renderAbrechnung(true), perms: ['abrechnung'] },
+  'getraenke/bezahlt': { render: renderBezahlt, perms: ['abrechnung'] },
+  'getraenke/statistik': { render: renderStatistik, perms: ['statistik'] },
+  'ausgabe': { render: renderAusgabe, perms: ['ausgabe'] },
+  'einstellungen': { render: renderEinstellungen, perms: ['einstellungen'] },
+  'admin': { render: renderAdmin, perms: ['admin'] },
 };
 
-function route() {
+// Getränkevergabe öffnet die erste Seite, für die der Benutzer Rechte hat.
+function renderGetraenkeStart() {
+  const first = ['einrichtung', 'abrechnung', 'statistik'].find(p => Auth.can(p));
+  location.replace(first ? `#/getraenke/${first}` : '#/ausgabe');
+}
+
+let routeRun = 0;
+async function route() {
+  const run = ++routeRun;
   const path = location.hash.replace(/^#\/?/, '');
-  const isKiosk = path === 'ausgabe';
   editing = null;
-  document.body.classList.toggle('kiosk-mode', isKiosk);
-  keepAwake(isKiosk);
-  Promise.resolve().then(ROUTES[path] || renderHome).catch(err => {
+  document.body.classList.remove('kiosk-mode');
+  try {
+    if (!Auth.available()) return renderNoCrypto();
+    const hasUsers = (await DB.all('user')).length > 0;
+    await Auth.restore();
+    if (run !== routeRun) return; // inzwischen wurde schon weiter navigiert
+    updateUserBtn();
+    if (!hasUsers) { keepAwake(false); return renderSetup(); }
+    if (!Auth.user()) { keepAwake(false); return renderLogin(); }
+    const r = ROUTES[path] || ROUTES[''];
+    if (!canAny(r.perms)) {
+      toast('Dafür fehlt dir die Berechtigung');
+      location.replace('#/');
+      return;
+    }
+    const isKiosk = path === 'ausgabe';
+    document.body.classList.toggle('kiosk-mode', isKiosk);
+    keepAwake(isKiosk);
+    await r.render();
+    window.scrollTo(0, 0);
+  } catch (err) {
     console.error(err);
     view.innerHTML = `<div class="card"><p>Fehler: ${esc(err.message)}</p></div>`;
-  });
-  window.scrollTo(0, 0);
+  }
 }
 window.addEventListener('hashchange', route);
 document.addEventListener('visibilitychange', () => {
