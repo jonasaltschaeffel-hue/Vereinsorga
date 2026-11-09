@@ -1408,8 +1408,11 @@ async function renderAdmin() {
       <h2>Benutzerverwaltung</h2>
       <p class="muted">Neue Benutzer erstellen ihr Konto selbst über „Konto erstellen“ auf der Anmeldeseite
       und sehen danach nur die Einstellungen. Im Benutzerfenster gibst du ihnen die Bereiche frei.</p>
-      <button class="btn primary" id="openUsers">👥 Benutzer öffnen</button>
-      ${waiting ? `<button class="btn" id="openNew">⏳ ${waiting} ${waiting === 1 ? 'neues Konto' : 'neue Konten'} ansehen</button>` : ''}
+      <div class="action-row">
+        <button class="btn primary" id="openUsers">👥 Benutzer öffnen</button>
+        <button class="btn" id="createUser">＋ Benutzer erstellen</button>
+        ${waiting ? `<button class="btn" id="openNew">⏳ ${waiting} ${waiting === 1 ? 'neues Konto' : 'neue Konten'} ansehen</button>` : ''}
+      </div>
     </div>
     <div class="card">
       <h2>Gut zu wissen</h2>
@@ -1420,6 +1423,7 @@ async function renderAdmin() {
   const open = filter => { adminState.filter = filter; adminState.query = ''; openUsersWindow(); };
   document.getElementById('openUsers').addEventListener('click', () => open('all'));
   document.getElementById('openNew')?.addEventListener('click', () => open('new'));
+  document.getElementById('createUser').addEventListener('click', () => openCreateUser(false));
   view.querySelectorAll('.stat').forEach(b => b.addEventListener('click', () => open(b.dataset.filter)));
 }
 
@@ -1429,7 +1433,8 @@ function openUsersWindow() {
   const FILTERS = [['all', 'Alle'], ['new', 'Wartet auf Freigabe'], ['admin', 'Admins'], ['locked', 'Gesperrt']];
   const modal = openModal(`
     <div class="modal-head">
-      <div class="grow"><h2>👥 Benutzer</h2></div>
+      <div class="grow"><h2>👥 Benutzer <span class="muted" style="font-size:16px;font-weight:400">(${adminState.users.length})</span></h2></div>
+      <button class="btn primary small" id="newUserBtn">＋ Benutzer erstellen</button>
       <button class="icon-btn" data-close aria-label="Schließen">✕</button>
     </div>
     <input type="search" id="userSearch" placeholder="🔍 Benutzer suchen …" autocomplete="off" value="${esc(adminState.query)}">
@@ -1437,7 +1442,8 @@ function openUsersWindow() {
       ${FILTERS.map(([k, l]) => `<button class="chip ${adminState.filter === k ? 'active' : ''}" data-f="${k}">${l}</button>`).join('')}
     </div>
     <div class="user-grid" id="userGrid"></div>`, { onClose: renderAdmin });
-  modal.classList.add('wide');
+  modal.classList.add('wide', 'fullscreen');
+  modal.querySelector('#newUserBtn').addEventListener('click', () => openCreateUser(true));
 
   const draw = () => {
     const q = norm(adminState.query);
@@ -1475,6 +1481,63 @@ function openUsersWindow() {
   });
   draw();
   if (window.matchMedia('(pointer: fine)').matches) search.focus(); // am PC gleich lostippen; am Handy keine Tastatur aufklappen
+}
+
+// Admin legt selbst einen Benutzer an. fromList: danach zurück ins Benutzerfenster
+function openCreateUser(fromList) {
+  const modal = openModal(`
+    <div class="modal-head">
+      ${fromList ? '<button class="icon-btn back" id="backToList" aria-label="Zurück zur Liste">←</button>' : ''}
+      <div class="grow"><h2>Benutzer erstellen</h2></div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button>
+    </div>
+    <form id="createForm">
+      <div class="row">
+        <div><label for="cuName">Name</label><input id="cuName" maxlength="40" autocomplete="off" required></div>
+        <div>${pwField('cuPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}</div>
+      </div>
+      <p class="muted" style="font-size:14px;margin:8px 0 0">Gib der Person Name und Passwort weiter. Sie kann sich damit sofort anmelden.</p>
+      <h3 class="sub-title">Rechte</h3>
+      <div class="perm-grid">${Auth.PERMS.map(([k, l]) => `
+        <label class="check"><input type="checkbox" name="cuPerm" value="${k}" ${k === 'einstellungen' ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        <button class="btn" type="button" id="cuCancel">Abbrechen</button>
+        <span class="grow"></span>
+        <button class="btn primary" type="submit">Benutzer erstellen</button>
+      </div>
+    </form>`, { onClose: renderAdmin });
+  modal.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
+    const input = modal.querySelector('#' + b.dataset.toggle);
+    input.type = input.type === 'password' ? 'text' : 'password';
+  }));
+  const leave = () => fromList ? openUsersWindow() : (closeModal(), renderAdmin());
+  modal.querySelector('#backToList')?.addEventListener('click', leave);
+  modal.querySelector('#cuCancel').addEventListener('click', leave);
+  modal.querySelector('#cuName').focus();
+
+  modal.querySelector('#createForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const err = msg => { const p = modal.querySelector('.form-error'); p.textContent = msg; p.hidden = !msg; };
+    const name = modal.querySelector('#cuName').value.trim();
+    const pw = modal.querySelector('#cuPw').value;
+    const perms = [...modal.querySelectorAll('[name="cuPerm"]:checked')].map(c => c.value);
+    const problem = !name ? 'Bitte einen Namen eingeben.' : passwordProblem(pw) || (!perms.length ? 'Bitte mindestens ein Recht auswählen.' : '');
+    if (problem) return err(problem);
+    const btn = ev.submitter;
+    if (btn) { btn.disabled = true; btn.textContent = 'Wird erstellt …'; }
+    try {
+      await Auth.createMember(name, pw, perms);
+      toast(`Benutzer ${name} erstellt`);
+      await loadMembers();
+      adminState.query = '';
+      adminState.filter = 'all';
+      openUsersWindow();
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Benutzer erstellen'; }
+      err(fbMessage(e));
+    }
+  });
 }
 
 // Detailfenster eines Benutzers: Rechte und Aktionen

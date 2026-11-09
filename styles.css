@@ -315,6 +315,15 @@ fieldset.scope legend { font-size: 14px; color: var(--muted); padding: 0 4px; }
 .stat.attention { border-color: #d68a00; border-width: 2px; }
 .stat.attention strong { color: #d68a00; }
 .modal.wide { max-width: 1000px; }
+/* Benutzerfenster im Vollbild */
+.modal-backdrop:has(.modal.fullscreen) { padding: 0; }
+.modal.fullscreen {
+  max-width: none; width: 100%; height: 100%; max-height: 100%; border-radius: 0;
+  padding: calc(16px + env(safe-area-inset-top)) max(20px, 4vw) calc(24px + env(safe-area-inset-bottom));
+}
+.modal.fullscreen .user-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.modal.fullscreen #userSearch { max-width: 520px; }
+.modal-head .btn.small { align-self: center; }
 .modal.wide #userSearch { margin-top: 4px; }
 .user-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 14px; }
 .user-tile {

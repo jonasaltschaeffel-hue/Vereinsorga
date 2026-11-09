@@ -203,6 +203,18 @@ const Auth = (() => {
     startSession(member, false);
     return { user: member };
   }
+  // Admin legt einen Benutzer selbst an (gilt als freigegeben, wenn echte Rechte vergeben werden)
+  async function createMember(name, password, perms) {
+    const tok = await token();
+    if (await FB.getDoc('logins', nameKey(name))) throw new Error(`Der Name „${name}“ ist schon vergeben.`);
+    const email = FB.newEmail();
+    const s = await FB.signUp(email, password); // Sitzung des neuen Kontos wird nicht verwendet
+    await FB.commit([
+      { coll: 'members', id: s.uid, data: memberData({ name, perms, approved: perms.some(p => p !== 'einstellungen') }) },
+      { coll: 'logins', id: nameKey(name), data: { email, uid: s.uid, name } },
+    ], tok);
+  }
+
   // Konto wartet auf Freigabe: hat noch keines der Rechte außer „einstellungen“
   // Nur wirklich neue Konten: noch nie freigegeben und (noch) keine Rechte außer „einstellungen“.
   // Ältere Konten ohne Merker, die schon Rechte haben, gelten als freigegeben.
@@ -244,6 +256,6 @@ const Auth = (() => {
 
   return {
     PERMS, MIN_PASSWORD, available, user: () => current, can, isAdmin, restore, logout, login, token,
-    refreshMember, setupStatus, createFirstAdmin, register, isWaiting, listMembers, updateMember, deleteMember, resetPassword,
+    refreshMember, setupStatus, createFirstAdmin, register, isWaiting, listMembers, createMember, updateMember, deleteMember, resetPassword,
   };
 })();
