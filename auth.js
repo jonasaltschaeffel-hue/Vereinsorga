@@ -177,16 +177,29 @@ const Auth = (() => {
     return list.map(m => ({ ...m, uid: m.id })).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   }
 
-  async function createMember(name, password, perms) {
-    const tok = await token();
-    if (await FB.getDoc('logins', nameKey(name))) throw new Error(`Es gibt schon einen Benutzer „${name}“.`);
+  // Selbst-Registrierung: neues Konto nur mit dem Recht „einstellungen“ – weitere Rechte gibt ein Admin frei.
+  const NEW_USER_PERMS = ['einstellungen'];
+  async function register(name, password) {
+    if (await FB.getDoc('logins', nameKey(name))) return { error: `Der Name „${name}“ ist schon vergeben.` };
     const email = FB.newEmail();
     const s = await FB.signUp(email, password);
-    await FB.commit([
-      { coll: 'members', id: s.uid, data: memberData({ name, perms }) },
-      { coll: 'logins', id: nameKey(name), data: { email, uid: s.uid, name } },
-    ], tok);
+    try {
+      await FB.commit([
+        { coll: 'members', id: s.uid, data: memberData({ name, perms: NEW_USER_PERMS }) },
+        { coll: 'logins', id: nameKey(name), data: { email, uid: s.uid, name } },
+      ], s.idToken);
+    } catch (e) {
+      if (e.status === 403) return { error: `Der Name „${name}“ ist schon vergeben.` };
+      throw e;
+    }
+    saveAuth(s);
+    const member = { uid: s.uid, name, perms: NEW_USER_PERMS, active: true, email };
+    await cacheMember(member, password);
+    startSession(member, false);
+    return { user: member };
   }
+  // Konto wartet auf Freigabe: hat noch keines der Rechte außer „einstellungen“
+  const isWaiting = u => !!u && !(u.perms || []).some(p => p !== 'einstellungen');
 
   async function updateMember(m, changes) {
     await FB.commit([{ coll: 'members', id: m.uid, data: memberData({ ...m, ...changes }) }], await token());
@@ -220,6 +233,6 @@ const Auth = (() => {
 
   return {
     PERMS, MIN_PASSWORD, available, user: () => current, can, isAdmin, restore, logout, login, token,
-    refreshMember, setupStatus, createFirstAdmin, listMembers, createMember, updateMember, deleteMember, resetPassword,
+    refreshMember, setupStatus, createFirstAdmin, register, isWaiting, listMembers, updateMember, deleteMember, resetPassword,
   };
 })();

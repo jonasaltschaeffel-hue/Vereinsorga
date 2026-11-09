@@ -11,7 +11,10 @@ const Sync = (() => {
   let running = false, again = false, timer = null;
 
   const emit = () => listeners.forEach(fn => fn({ ...state }));
-  const canReadPayments = () => Auth.can('abrechnung') || Auth.can('statistik');
+  // Nur abrufen, was der Benutzer laut Zugriffsregeln lesen darf (sonst lehnt der Server ab)
+  const canRead = coll => coll === 'payments'
+    ? Auth.can('abrechnung') || Auth.can('statistik')
+    : ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'].some(p => Auth.can(p));
 
   function schedule(ms = 1500) {
     clearTimeout(timer);
@@ -81,7 +84,7 @@ const Sync = (() => {
   async function pull(token) {
     let changed = false;
     for (const [type, coll] of Object.entries(COLL)) {
-      if (coll === 'payments' && !canReadPayments()) continue;
+      if (!canRead(coll)) continue;
       const key = 'sync.since.' + coll;
       let since = localStorage.getItem(key) || '1970-01-01T00:00:00Z';
       for (;;) {

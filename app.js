@@ -72,6 +72,12 @@ function renderHome() {
   setTitle('Vereinsorga');
   view.innerHTML = `
     <p class="greeting">Hallo <strong>${esc(Auth.user().name)}</strong>!</p>
+    ${Auth.isWaiting(Auth.user()) ? `
+      <div class="card waiting">
+        <h2>⏳ Dein Konto wartet auf Freigabe</h2>
+        <p class="muted" style="margin:0">Ein Admin muss dir erst die Bereiche freigeben, die du nutzen darfst.
+        Sobald das passiert ist, erscheinen sie hier automatisch (mit Internet nach spätestens 30 Sekunden).</p>
+      </div>` : ''}
     <div class="tiles">
       ${MODULES.filter(m => canAny(m.perms)).map(m => `
         <a class="tile ${m.disabled ? 'disabled' : ''}" href="${m.href}">
@@ -1189,7 +1195,12 @@ function renderLogin(offline) {
       <p class="form-error" hidden></p>
       <button class="btn primary wide" type="submit">Anmelden</button>
     </form>
-    <button class="link-btn" id="forgot" type="button">Passwort vergessen?</button>`);
+    <button class="link-btn" id="forgot" type="button">Passwort vergessen?</button>
+    <div class="auth-alt">
+      <p class="muted">Noch kein Konto?</p>
+      <button class="btn wide" id="toRegister" type="button">Konto erstellen</button>
+    </div>`);
+  document.getElementById('toRegister').addEventListener('click', renderRegister);
   bindPwToggles();
   document.getElementById('lName').focus();
   document.getElementById('loginForm').addEventListener('submit', async ev => {
@@ -1208,6 +1219,46 @@ function renderLogin(offline) {
     Sync.run();
   });
   document.getElementById('forgot').addEventListener('click', renderForgot);
+}
+
+function renderRegister() {
+  authShell(`
+    <h2>Konto erstellen</h2>
+    <p class="muted">Nach dem Erstellen kannst du dich anmelden. Welche Bereiche du nutzen darfst,
+    gibt ein Admin frei – bis dahin siehst du nur die Einstellungen.</p>
+    <form id="regForm">
+      <label for="rName">Name</label><input id="rName" autocomplete="username" maxlength="40" required>
+      ${pwField('rPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}
+      ${pwField('rPw2', 'Passwort wiederholen', 'new-password')}
+      <p class="form-error" hidden></p>
+      <button class="btn primary wide" type="submit">Konto erstellen</button>
+    </form>
+    <button class="link-btn" id="back" type="button">Zurück zur Anmeldung</button>`);
+  bindPwToggles();
+  document.getElementById('rName').focus();
+  document.getElementById('back').addEventListener('click', () => renderLogin(!navigator.onLine));
+  document.getElementById('regForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const name = document.getElementById('rName').value.trim();
+    const pw = document.getElementById('rPw').value;
+    const problem = !name ? 'Bitte einen Namen eingeben.' : passwordProblem(pw, document.getElementById('rPw2').value);
+    if (problem) return formError(problem);
+    if (!navigator.onLine) return formError('Zum Erstellen eines Kontos braucht es eine Internetverbindung.');
+    const btn = ev.submitter;
+    if (btn) { btn.disabled = true; btn.textContent = 'Wird erstellt …'; }
+    try {
+      const res = await Auth.register(name, pw);
+      if (res.error) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Konto erstellen'; }
+        return formError(res.error);
+      }
+      toast(`Konto ${name} erstellt`);
+      go('#/');
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Konto erstellen'; }
+      formError(fbMessage(e));
+    }
+  });
 }
 
 function renderForgot() {
@@ -1240,28 +1291,30 @@ async function renderAdmin() {
   const permBoxes = (name, perms) => Auth.PERMS.map(([k, l]) => `
     <label class="check"><input type="checkbox" name="${name}" value="${k}" ${perms.includes(k) ? 'checked' : ''}> ${l}</label>`).join('');
 
+  // Neue Konten, die auf Freigabe warten, zuerst
+  users.sort((a, b) => (Auth.isWaiting(b) && b.active !== false) - (Auth.isWaiting(a) && a.active !== false)
+    || a.name.localeCompare(b.name, 'de'));
+  const waiting = users.filter(u => Auth.isWaiting(u) && u.active !== false).length;
+
   view.innerHTML = `
     <div class="card">
-      <h2>Neuer Benutzer</h2>
-      <form id="newUser">
-        <div class="row">
-          <div><label for="nuName">Name</label><input id="nuName" autocomplete="off" required></div>
-          <div>${pwField('nuPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}</div>
-        </div>
-        <p class="muted" style="margin:14px 0 4px">Rechte</p>
-        <div class="perm-grid">${permBoxes('nuPerm', ['ausgabe'])}</div>
-        <p class="form-error" hidden></p>
-        <button class="btn primary" type="submit" style="margin-top:10px">Benutzer anlegen</button>
-      </form>
+      <h2>Neue Benutzer</h2>
+      <p class="muted" style="margin:0">Neue Benutzer erstellen ihr Konto selbst auf der Anmeldeseite unter
+      „Konto erstellen“. Sie können danach nur die Einstellungen öffnen. Hier gibst du ihnen die Bereiche frei,
+      die sie nutzen dürfen – einfach die Häkchen setzen, das wird sofort gespeichert.
+      Unbekannte Konten kannst du sperren oder löschen.</p>
+      ${waiting ? `<p style="margin:10px 0 0"><strong>${waiting} ${waiting === 1 ? 'Konto wartet' : 'Konten warten'} auf Freigabe.</strong></p>` : ''}
     </div>
     <h2 class="section-title">Benutzer (${users.length})</h2>
     ${users.map(u => `
-      <div class="card user-card ${u.active === false ? 'locked' : ''}" data-id="${u.uid}">
+      <div class="card user-card ${u.active === false ? 'locked' : ''} ${Auth.isWaiting(u) && u.active !== false ? 'waiting' : ''}" data-id="${u.uid}">
         <div class="bill-head">
           <div class="grow"><strong>${esc(u.name)}</strong>
             ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
             ${(u.perms || []).includes('admin') ? '<span class="tag">Admin</span>' : ''}
-            ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}</div>
+            ${Auth.isWaiting(u) && u.active !== false ? '<span class="tag new">wartet auf Freigabe</span>' : ''}
+            ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}
+            ${u.createdAt ? `<div class="bill-sub" style="color:var(--muted)">erstellt ${dateTime(u.createdAt)}</div>` : ''}</div>
           <button class="btn small" data-act="pw">Passwort neu setzen</button>
           ${u.uid !== me.uid ? `
             <button class="btn small" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
@@ -1292,17 +1345,6 @@ async function renderAdmin() {
       if (el) el.disabled = false;
     }
   };
-
-  document.getElementById('newUser').addEventListener('submit', async ev => {
-    ev.preventDefault();
-    const name = document.getElementById('nuName').value.trim();
-    const pw = document.getElementById('nuPw').value;
-    const perms = [...view.querySelectorAll('[name="nuPerm"]:checked')].map(c => c.value);
-    const problem = !name ? 'Bitte einen Namen eingeben.'
-      : passwordProblem(pw) || (!perms.length ? 'Bitte mindestens ein Recht auswählen.' : '');
-    if (problem) return formError(problem);
-    if (await act(() => Auth.createMember(name, pw, perms), `Benutzer ${name} angelegt`, ev.submitter)) renderAdmin();
-  });
 
   view.querySelectorAll('.user-card').forEach(card => {
     const u = users.find(x => x.uid === card.dataset.id);
@@ -1445,6 +1487,15 @@ Sync.start();
 route().then(() => { if (Auth.user()) Sync.run(); });
 
 if ('serviceWorker' in navigator) {
+  // Wurde eine neue App-Version installiert, einmal neu laden – aber nicht mitten in einer Ausgabe.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    if (document.body.classList.contains('kiosk-mode') && (kiosk.person || kiosk.cart.size)) return;
+    reloading = true;
+    location.reload();
+  });
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker nicht registriert:', err));
 }
 // Browser bitten, die Daten nicht automatisch zu löschen

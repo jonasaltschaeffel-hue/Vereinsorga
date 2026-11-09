@@ -194,6 +194,8 @@ label.check input { width: 20px; height: 20px; flex: none; }
   background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); vertical-align: middle;
 }
 .tag.warn { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.tag.new { background: color-mix(in srgb, #d68a00 18%, transparent); color: #a86a00; }
+.card.waiting { border-color: #d68a00; border-width: 2px; }
 
 /* Bearbeiten in der Eingabezeile */
 .add-form.editing input { border-color: var(--primary); border-width: 2px; }
