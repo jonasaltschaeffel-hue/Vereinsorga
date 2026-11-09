@@ -13,6 +13,8 @@ const Auth = (() => {
     ['einrichtung', 'Personen & Getränke verwalten'],
     ['abrechnung', 'Abrechnung & Zahlungen'],
     ['statistik', 'Statistik ansehen'],
+    ['kalender', 'Kalender ansehen'],
+    ['kalender_bearbeiten', 'Kalender bearbeiten'],
     ['einstellungen', 'Einstellungen & Sicherung'],
     ['admin', 'Admin: Benutzer & Rechte verwalten (darf alles)'],
   ];

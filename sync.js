@@ -3,7 +3,8 @@
 // 2. Herunterladen: alles, was seit dem letzten Abgleich auf dem Server geändert wurde
 // Läuft nach jeder Änderung (kurz verzögert), alle 30 Sekunden, beim Wiederverbinden und beim Öffnen.
 const Sync = (() => {
-  const COLL = { person: 'persons', drink: 'drinks', drinkEntry: 'entries', payment: 'payments' };
+  const COLL = { person: 'persons', drink: 'drinks', drinkEntry: 'entries', payment: 'payments',
+    event: 'events', calCategory: 'calcategories' };
   const BATCH = 200;      // Schreibvorgänge pro Hochladen
   const PAGE = 300;       // Dokumente pro Abruf (muss größer als BATCH sein)
   const state = { status: 'idle', pending: 0, error: '', last: null };
@@ -12,8 +13,9 @@ const Sync = (() => {
 
   const emit = () => listeners.forEach(fn => fn({ ...state }));
   // Nur abrufen, was der Benutzer laut Zugriffsregeln lesen darf (sonst lehnt der Server ab)
-  const canRead = coll => coll === 'payments'
-    ? Auth.can('abrechnung') || Auth.can('statistik')
+  const canRead = coll =>
+    coll === 'payments' ? Auth.can('abrechnung') || Auth.can('statistik')
+    : coll === 'events' || coll === 'calcategories' ? Auth.can('kalender') || Auth.can('kalender_bearbeiten')
     : ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'].some(p => Auth.can(p));
 
   function schedule(ms = 1500) {

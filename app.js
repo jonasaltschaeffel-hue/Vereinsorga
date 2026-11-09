@@ -9,6 +9,7 @@ const backBtn = document.getElementById('backBtn');
 const DRINK_PERMS = ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'];
 const MODULES = [
   { href: '#/getraenke', emoji: '🥤', name: 'Getränkevergabe', desc: 'Personen, Getränke, Ausgabe, Abrechnung', perms: DRINK_PERMS },
+  { href: '#/kalender', emoji: '📅', name: 'Kalender', desc: 'Termine & Veranstaltungen', perms: ['kalender', 'kalender_bearbeiten'] },
   { href: '#/admin', emoji: '🔑', name: 'Admin', desc: 'Benutzer & Rechte', perms: ['admin'] },
   { href: '#/einstellungen', emoji: '⚙️', name: 'Einstellungen', desc: 'Gerät, Sicherung, Import', perms: ['einstellungen'] },
   { href: '', emoji: '➕', name: 'Weitere Module', desc: 'folgen', disabled: true },
@@ -1399,6 +1400,7 @@ const ROUTES = {
   'getraenke/bezahlt': { render: renderBezahlt, perms: ['abrechnung'] },
   'getraenke/statistik': { render: renderStatistik, perms: ['statistik'] },
   'ausgabe': { render: renderAusgabe, perms: ['ausgabe'] },
+  'kalender': { render: renderKalender, perms: ['kalender', 'kalender_bearbeiten'] },
   'einstellungen': { render: renderEinstellungen, perms: ['einstellungen'] },
   'admin': { render: renderAdmin, perms: ['admin'] },
 };
@@ -1414,6 +1416,7 @@ async function route(opts = {}) {
   const run = ++routeRun;
   const path = location.hash.replace(/^#\/?/, '');
   editing = null;
+  if (!opts.refresh) closeModal();
   document.body.classList.remove('kiosk-mode');
   try {
     if (!Auth.available()) return renderNoCrypto();
@@ -1452,7 +1455,7 @@ document.addEventListener('visibilitychange', () => {
 
 // Nach einem Abgleich mit neuen Daten die Seite auffrischen – aber nicht mitten in einer Eingabe.
 window.addEventListener('sync-changed', () => {
-  if (!Auth.user() || editing) return;
+  if (!Auth.user() || editing || document.querySelector('.modal-backdrop')) return;
   const a = document.activeElement;
   if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
   if (document.body.classList.contains('kiosk-mode') && (kiosk.person || kiosk.cart.size)) return;
