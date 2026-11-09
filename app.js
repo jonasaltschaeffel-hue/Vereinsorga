@@ -85,6 +85,7 @@ async function renderHome() {
         <h2>Keine Bereiche freigegeben</h2>
         <p class="muted" style="margin:0">Dir sind im Moment keine Bereiche freigegeben. Wende dich bei Bedarf an einen Admin.</p>
       </div>` : ''}
+    ${widget && widget.position === 'above' ? widget.html : ''}
     <div class="tiles">
       ${MODULES.filter(m => canAny(m.perms)).map(m => `
         <a class="tile ${m.disabled ? 'disabled' : ''}" href="${m.href}">
@@ -93,7 +94,7 @@ async function renderHome() {
           <small>${esc(m.desc)}</small>
         </a>`).join('')}
     </div>
-    ${widget ? widget.html : ''}
+    ${widget && widget.position !== 'above' ? widget.html : ''}
     ${localStorage.getItem('deviceName') || !Auth.can('einstellungen') ? '' : `
       <div class="card" style="margin-top:14px">
         <h2>Tipp</h2>
@@ -1000,10 +1001,64 @@ function syncText(s) {
   return 'Noch nicht abgeglichen' + wait + '.';
 }
 
+// Farbschema: 'light' | 'dark' | 'auto' (wie das Gerät)
+function applyTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+
 async function renderEinstellungen() {
   setTitle('Einstellungen', '#/');
   const count = (await DB.allRecords()).filter(r => !r.deleted && DB.SYNC_TYPES.includes(r.type)).length;
+  const theme = localStorage.getItem('theme') || 'auto';
+  const seesCalendar = Auth.can('kalender') || Auth.can('kalender_bearbeiten');
+  const wp = seesCalendar ? widgetPrefs() : null;
+  const cats = seesCalendar ? (await loadCalendar()).cats : [];
+  const catChecked = id => !wp.cats || wp.cats.includes(id);
   view.innerHTML = `
+    <div class="card">
+      <h2>Darstellung</h2>
+      <div class="seg" role="radiogroup" aria-label="Farbschema">
+        ${[['light', '☀️ Hell'], ['dark', '🌙 Dunkel'], ['auto', '⚙️ Automatisch']].map(([k, l]) => `
+          <label><input type="radio" name="theme" value="${k}" ${theme === k ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+      </div>
+      <p class="muted" style="margin:10px 0 0;font-size:14px">„Automatisch“ folgt der Einstellung deines Geräts. Die Auswahl gilt für dieses Gerät.</p>
+    </div>
+    ${seesCalendar ? `
+    <div class="card">
+      <h2>Startseiten-Widget „Nächste Termine“</h2>
+      <form id="widgetForm" class="widget-form">
+        <label class="check"><input type="checkbox" name="show" ${wp.show ? 'checked' : ''}> Widget auf der Startseite anzeigen</label>
+        <div class="widget-opts" ${wp.show ? '' : 'hidden'}>
+          <div class="row">
+            <div><label for="wTitle">Überschrift</label><input id="wTitle" name="title" maxlength="40" value="${esc(wp.title)}"></div>
+            <div class="shrink" style="width:140px"><label for="wCount">Anzahl Termine</label>
+              <select id="wCount" name="count">${[3, 4, 5, 6, 8, 10, 15, 20].map(n => `<option ${n === Number(wp.count) ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          </div>
+          <div class="row">
+            <div><label for="wDays">Zeitraum</label>
+              <select id="wDays" name="days">${[[7, 'nächste 7 Tage'], [14, 'nächste 2 Wochen'], [30, 'nächster Monat'], [90, 'nächste 3 Monate'], [180, 'nächstes halbes Jahr'], [365, 'nächstes Jahr']]
+                .map(([n, l]) => `<option value="${n}" ${n === Number(wp.days) ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div><label for="wPos">Position</label>
+              <select id="wPos" name="position">
+                <option value="above" ${wp.position === 'above' ? 'selected' : ''}>über den Kacheln</option>
+                <option value="below" ${wp.position !== 'above' ? 'selected' : ''}>unter den Kacheln</option>
+              </select></div>
+          </div>
+          <label class="check"><input type="checkbox" name="showTime" ${wp.showTime ? 'checked' : ''}> Uhrzeit anzeigen</label>
+          <label class="check"><input type="checkbox" name="showLocation" ${wp.showLocation ? 'checked' : ''}> Ort anzeigen</label>
+          <p class="muted" style="margin:14px 0 4px">Diese Kategorien anzeigen</p>
+          <div class="perm-grid">
+            ${cats.map(c => `<label class="check"><input type="checkbox" name="cat" value="${c.id}" ${catChecked(c.id) ? 'checked' : ''}>
+              <i class="dot" style="--c:${c.color}"></i> ${esc(c.name)}</label>`).join('')}
+            <label class="check"><input type="checkbox" name="cat" value="" ${catChecked('') ? 'checked' : ''}> ohne Kategorie</label>
+          </div>
+          <button class="btn small" type="button" id="wReset" style="margin-top:12px">Auf Standard zurücksetzen</button>
+        </div>
+      </form>
+      <p class="muted" style="margin:10px 0 0;font-size:14px">Änderungen werden sofort gespeichert und gelten für dich auf diesem Gerät.</p>
+    </div>` : ''}`;
+  view.insertAdjacentHTML('beforeend', `
     <div class="card">
       <h2>Abgleich zwischen den Geräten</h2>
       <p id="syncInfo">${esc(syncText(Sync.state()))}</p>
@@ -1041,7 +1096,39 @@ async function renderEinstellungen() {
       Windows: Edge/Chrome → Installieren-Symbol in der Adressleiste.<br>
       Danach funktioniert sie ohne Internet; Änderungen werden abgeglichen, sobald wieder Internet da ist.</p>
     </div>
-  `;
+  `);
+
+  view.querySelectorAll('[name=theme]').forEach(r => r.addEventListener('change', () => {
+    localStorage.setItem('theme', r.value);
+    applyTheme(r.value);
+  }));
+
+  const wf = document.getElementById('widgetForm');
+  if (wf) {
+    const saveWidget = () => {
+      const f = name => wf.elements[name];
+      const checkedCats = [...wf.querySelectorAll('[name=cat]:checked')].map(c => c.value);
+      const allCats = wf.querySelectorAll('[name=cat]').length;
+      saveWidgetPrefs({
+        show: f('show').checked,
+        title: f('title').value.trim() || WIDGET_DEFAULTS.title,
+        count: Number(f('count').value),
+        days: Number(f('days').value),
+        position: f('position').value,
+        showTime: f('showTime').checked,
+        showLocation: f('showLocation').checked,
+        cats: checkedCats.length === allCats ? null : checkedCats, // alle angehakt = auch künftige Kategorien
+      });
+      wf.querySelector('.widget-opts').hidden = !f('show').checked;
+    };
+    wf.addEventListener('change', saveWidget);
+    wf.addEventListener('submit', ev => ev.preventDefault());
+    document.getElementById('wReset').addEventListener('click', () => {
+      saveWidgetPrefs({ ...WIDGET_DEFAULTS });
+      toast('Widget zurückgesetzt');
+      renderEinstellungen();
+    });
+  }
 
   document.getElementById('syncNow').addEventListener('click', () => Sync.run());
   document.getElementById('uploadAll')?.addEventListener('click', async () => {
@@ -1282,12 +1369,23 @@ function renderForgot() {
 }
 
 // ---------- Admin: Benutzer & Rechte ----------
+// Übersicht auf der Seite; die Benutzer selbst stehen in einem eigenen Fenster
+// (Kacheln nebeneinander, mit Suche und Filter). Ein Klick öffnet die Details.
+const adminState = { users: [], query: '', filter: 'all' };
+const isNewUser = u => Auth.isWaiting(u) && u.active !== false;
+const PERM_SHORT = { ausgabe: 'Ausgabe', einrichtung: 'Einrichtung', abrechnung: 'Abrechnung', statistik: 'Statistik',
+  kalender: 'Kalender', kalender_bearbeiten: 'Kalender ✎', einstellungen: 'Einstellungen', admin: 'Admin' };
+
+async function loadMembers() {
+  adminState.users = await Auth.listMembers();
+  return adminState.users;
+}
+
 async function renderAdmin() {
   setTitle('Admin', '#/');
   view.innerHTML = '<div class="card"><p class="muted" style="margin:0">Benutzer werden geladen …</p></div>';
-  let users;
   try {
-    users = await Auth.listMembers();
+    await loadMembers();
   } catch (e) {
     view.innerHTML = `<div class="card"><h2>Keine Verbindung</h2>
       <p>Die Benutzerverwaltung braucht eine Internetverbindung.</p>
@@ -1296,109 +1394,179 @@ async function renderAdmin() {
     document.getElementById('retry').addEventListener('click', renderAdmin);
     return;
   }
-  const me = Auth.user();
-  const permBoxes = (name, perms) => Auth.PERMS.map(([k, l]) => `
-    <label class="check"><input type="checkbox" name="${name}" value="${k}" ${perms.includes(k) ? 'checked' : ''}> ${l}</label>`).join('');
-
-  // Neue Konten, die auf Freigabe warten, zuerst
-  users.sort((a, b) => (Auth.isWaiting(b) && b.active !== false) - (Auth.isWaiting(a) && a.active !== false)
-    || a.name.localeCompare(b.name, 'de'));
-  const waiting = users.filter(u => Auth.isWaiting(u) && u.active !== false).length;
-
+  const users = adminState.users;
+  const count = f => users.filter(f).length;
+  const waiting = count(isNewUser);
   view.innerHTML = `
-    <div class="card">
-      <h2>Neue Benutzer</h2>
-      <p class="muted" style="margin:0">Neue Benutzer erstellen ihr Konto selbst auf der Anmeldeseite unter
-      „Konto erstellen“. Sie können danach nur die Einstellungen öffnen. Hier gibst du ihnen die Bereiche frei,
-      die sie nutzen dürfen – einfach die Häkchen setzen, das wird sofort gespeichert.
-      Unbekannte Konten kannst du sperren oder löschen.</p>
-      ${waiting ? `<p style="margin:10px 0 0"><strong>${waiting} ${waiting === 1 ? 'Konto wartet' : 'Konten warten'} auf Freigabe.</strong></p>` : ''}
+    <div class="admin-stats">
+      <button class="stat" data-filter="all"><strong>${users.length}</strong><span>Benutzer</span></button>
+      <button class="stat ${waiting ? 'attention' : ''}" data-filter="new"><strong>${waiting}</strong><span>warten auf Freigabe</span></button>
+      <button class="stat" data-filter="admin"><strong>${count(u => Auth.isAdmin(u))}</strong><span>Admins</span></button>
+      <button class="stat" data-filter="locked"><strong>${count(u => u.active === false)}</strong><span>gesperrt</span></button>
     </div>
-    <h2 class="section-title">Benutzer (${users.length})</h2>
-    ${users.map(u => `
-      <div class="card user-card ${u.active === false ? 'locked' : ''} ${Auth.isWaiting(u) && u.active !== false ? 'waiting' : ''}" data-id="${u.uid}">
-        <div class="bill-head">
-          <div class="grow"><strong>${esc(u.name)}</strong>
-            ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
-            ${(u.perms || []).includes('admin') ? '<span class="tag">Admin</span>' : ''}
-            ${Auth.isWaiting(u) && u.active !== false ? '<span class="tag new">wartet auf Freigabe</span>' : ''}
-            ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}
-            ${u.createdAt ? `<div class="bill-sub" style="color:var(--muted)">erstellt ${dateTime(u.createdAt)}</div>` : ''}</div>
-          ${Auth.isWaiting(u) && u.active !== false ? '<button class="btn small" data-act="known" title="Hinweis entfernen, ohne Rechte zu vergeben">Ist bekannt</button>' : ''}
-          <button class="btn small" data-act="pw">Passwort neu setzen</button>
-          ${u.uid !== me.uid ? `
-            <button class="btn small" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
-            <button class="btn small danger" data-act="del">Löschen</button>` : ''}
-        </div>
-        <div class="perm-grid">${permBoxes('perm', u.perms || [])}</div>
-      </div>`).join('')}
+    <div class="card">
+      <h2>Benutzerverwaltung</h2>
+      <p class="muted">Neue Benutzer erstellen ihr Konto selbst über „Konto erstellen“ auf der Anmeldeseite
+      und sehen danach nur die Einstellungen. Im Benutzerfenster gibst du ihnen die Bereiche frei.</p>
+      <button class="btn primary" id="openUsers">👥 Benutzer öffnen</button>
+      ${waiting ? `<button class="btn" id="openNew">⏳ ${waiting} ${waiting === 1 ? 'neues Konto' : 'neue Konten'} ansehen</button>` : ''}
+    </div>
     <div class="card">
       <h2>Gut zu wissen</h2>
       <p class="muted" style="margin:0">Benutzer und Rechte sind in Firebase gespeichert und gelten auf allen Geräten.
       Änderungen wirken beim nächsten Abgleich (online spätestens nach 30 Sekunden). Ein Gerät, das gerade offline ist,
       bemerkt eine Sperre erst, wenn es wieder Internet hat. Admins dürfen immer alles.</p>
     </div>`;
-  bindPwToggles();
+  const open = filter => { adminState.filter = filter; adminState.query = ''; openUsersWindow(); };
+  document.getElementById('openUsers').addEventListener('click', () => open('all'));
+  document.getElementById('openNew')?.addEventListener('click', () => open('new'));
+  view.querySelectorAll('.stat').forEach(b => b.addEventListener('click', () => open(b.dataset.filter)));
+}
 
-  const activeAdmins = () => users.filter(u => Auth.isAdmin(u));
-  // Führt eine Admin-Aktion aus und zeigt Fehler verständlich an
-  const act = async (fn, okMsg, el) => {
+// Fenster mit allen Benutzern als Kacheln
+function openUsersWindow() {
+  const me = Auth.user();
+  const FILTERS = [['all', 'Alle'], ['new', 'Wartet auf Freigabe'], ['admin', 'Admins'], ['locked', 'Gesperrt']];
+  const modal = openModal(`
+    <div class="modal-head">
+      <div class="grow"><h2>👥 Benutzer</h2></div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button>
+    </div>
+    <input type="search" id="userSearch" placeholder="🔍 Benutzer suchen …" autocomplete="off" value="${esc(adminState.query)}">
+    <div class="chips" id="userFilter">
+      ${FILTERS.map(([k, l]) => `<button class="chip ${adminState.filter === k ? 'active' : ''}" data-f="${k}">${l}</button>`).join('')}
+    </div>
+    <div class="user-grid" id="userGrid"></div>`, { onClose: renderAdmin });
+  modal.classList.add('wide');
+
+  const draw = () => {
+    const q = norm(adminState.query);
+    const list = adminState.users.filter(u =>
+      (!q || norm(u.name).includes(q)) &&
+      (adminState.filter === 'all' || (adminState.filter === 'new' && isNewUser(u))
+        || (adminState.filter === 'admin' && Auth.isAdmin(u)) || (adminState.filter === 'locked' && u.active === false)))
+      .sort((a, b) => isNewUser(b) - isNewUser(a) || a.name.localeCompare(b.name, 'de'));
+    modal.querySelector('#userGrid').innerHTML = list.length ? list.map(u => {
+      const perms = (u.perms || []).includes('admin') ? ['admin'] : (u.perms || []).filter(p => p !== 'einstellungen');
+      return `
+        <button class="user-tile ${u.active === false ? 'locked' : ''} ${isNewUser(u) ? 'waiting' : ''}" data-id="${u.uid}">
+          <span class="avatar">${esc(u.name.trim().charAt(0).toUpperCase() || '?')}</span>
+          <strong>${esc(u.name)}</strong>
+          <span class="tags">
+            ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
+            ${isNewUser(u) ? '<span class="tag new">neu</span>' : ''}
+            ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}
+          </span>
+          <small>${perms.length ? perms.map(p => PERM_SHORT[p] || p).join(' · ') : 'keine Bereiche'}</small>
+        </button>`;
+    }).join('') : '<p class="muted">Kein Benutzer gefunden.</p>';
+    modal.querySelectorAll('.user-tile').forEach(t => t.addEventListener('click', () =>
+      openUserDetail(adminState.users.find(u => u.uid === t.dataset.id))));
+  };
+
+  const search = modal.querySelector('#userSearch');
+  search.addEventListener('input', () => { adminState.query = search.value; draw(); });
+  modal.querySelector('#userFilter').addEventListener('click', ev => {
+    const chip = ev.target.closest('.chip');
+    if (!chip) return;
+    adminState.filter = chip.dataset.f;
+    modal.querySelectorAll('#userFilter .chip').forEach(c => c.classList.toggle('active', c === chip));
+    draw();
+  });
+  draw();
+  if (window.matchMedia('(pointer: fine)').matches) search.focus(); // am PC gleich lostippen; am Handy keine Tastatur aufklappen
+}
+
+// Detailfenster eines Benutzers: Rechte und Aktionen
+function openUserDetail(u) {
+  const me = Auth.user();
+  const users = adminState.users;
+  const activeAdmins = () => users.filter(x => Auth.isAdmin(x));
+  const modal = openModal(`
+    <div class="modal-head">
+      <button class="icon-btn back" id="backToList" aria-label="Zurück zur Liste">←</button>
+      <div class="grow"><h2>${esc(u.name)}</h2>
+        <span class="tags">
+          ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
+          ${Auth.isAdmin(u) ? '<span class="tag">Admin</span>' : ''}
+          ${isNewUser(u) ? '<span class="tag new">wartet auf Freigabe</span>' : ''}
+          ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}
+        </span>
+        ${u.createdAt ? `<div class="muted" style="font-size:14px;margin-top:4px">erstellt ${dateTime(u.createdAt)}</div>` : ''}</div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button>
+    </div>
+    <h3 class="sub-title">Rechte</h3>
+    <div class="perm-grid">${Auth.PERMS.map(([k, l]) => `
+      <label class="check"><input type="checkbox" name="perm" value="${k}" ${(u.perms || []).includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+    <p class="muted" style="font-size:14px;margin:8px 0 0">Häkchen werden sofort gespeichert.</p>
+    <h3 class="sub-title">Aktionen</h3>
+    <div class="action-row">
+      ${isNewUser(u) ? '<button class="btn" data-act="known">Ist bekannt</button>' : ''}
+      <button class="btn" data-act="pw">Passwort neu setzen</button>
+      ${u.uid !== me.uid ? `
+        <button class="btn" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
+        <button class="btn danger" data-act="del">Löschen</button>` : ''}
+    </div>`, { onClose: renderAdmin });
+
+  const back = () => openUsersWindow();
+  modal.querySelector('#backToList').addEventListener('click', back);
+
+  // Aktion ausführen, Benutzer neu laden und Fenster aktualisieren
+  const act = async (fn, okMsg, el, after = 'detail') => {
     if (el) el.disabled = true;
     try {
       await fn();
       if (okMsg) toast(okMsg);
+      await loadMembers();
+      const fresh = adminState.users.find(x => x.uid === u.uid || x.name === u.name);
+      if (after === 'list' || !fresh) back(); else openUserDetail(fresh);
       return true;
     } catch (e) {
       alert(fbMessage(e));
-      return false;
-    } finally {
       if (el) el.disabled = false;
+      return false;
     }
   };
 
-  view.querySelectorAll('.user-card').forEach(card => {
-    const u = users.find(x => x.uid === card.dataset.id);
+  modal.querySelectorAll('[name="perm"]').forEach(box => box.addEventListener('change', async () => {
+    const perms = [...modal.querySelectorAll('[name="perm"]:checked')].map(c => c.value);
+    const losesAdmin = Auth.isAdmin(u) && !perms.includes('admin');
+    if (losesAdmin && activeAdmins().length <= 1) {
+      box.checked = true;
+      return alert('Es muss immer mindestens einen Admin geben.');
+    }
+    if (losesAdmin && u.uid === me.uid &&
+      !confirm('Du nimmst dir selbst die Admin-Rechte. Danach kannst du diese Seite nicht mehr öffnen. Fortfahren?')) {
+      box.checked = true;
+      return;
+    }
+    modal.querySelectorAll('[name="perm"]').forEach(b => { b.disabled = true; });
+    const ok = await act(() => Auth.updateMember(u, { perms }), `Rechte von ${u.name} gespeichert`);
+    if (!ok) { modal.querySelectorAll('[name="perm"]').forEach(b => { b.disabled = false; }); box.checked = !box.checked; return; }
+    if (u.uid === me.uid) { await Sync.run(); if (losesAdmin) { closeModal(); go('#/'); } }
+  }));
 
-    card.querySelectorAll('[name="perm"]').forEach(box => box.addEventListener('change', async () => {
-      const perms = [...card.querySelectorAll('[name="perm"]:checked')].map(c => c.value);
-      const losesAdmin = Auth.isAdmin(u) && !perms.includes('admin');
-      if (losesAdmin && activeAdmins().length <= 1) {
-        box.checked = true;
-        return alert('Es muss immer mindestens einen Admin geben.');
-      }
-      if (losesAdmin && u.uid === me.uid &&
-        !confirm('Du nimmst dir selbst die Admin-Rechte. Danach kannst du diese Seite nicht mehr öffnen. Fortfahren?')) {
-        box.checked = true;
-        return;
-      }
-      if (!await act(() => Auth.updateMember(u, { perms }), `Rechte von ${u.name} gespeichert`)) { box.checked = !box.checked; return; }
-      if (u.uid === me.uid) { await Sync.run(); if (losesAdmin) return go('#/'); }
-      renderAdmin();
-    }));
+  modal.querySelector('[data-act="known"]')?.addEventListener('click', ev =>
+    act(() => Auth.updateMember(u, { approved: true }), `${u.name} ist jetzt als bekannt markiert`, ev.currentTarget));
 
-    card.querySelector('[data-act="known"]')?.addEventListener('click', async ev => {
-      if (await act(() => Auth.updateMember(u, { approved: true }), `${u.name} ist jetzt als bekannt markiert`, ev.currentTarget)) renderAdmin();
-    });
+  modal.querySelector('[data-act="pw"]').addEventListener('click', ev => {
+    const pw = prompt(`Neues Passwort für ${u.name} (mind. ${Auth.MIN_PASSWORD} Zeichen):`);
+    if (pw === null) return;
+    const problem = passwordProblem(pw);
+    if (problem) return alert(problem);
+    act(() => Auth.resetPassword(u, pw), `Passwort von ${u.name} geändert`, ev.currentTarget);
+  });
 
-    card.querySelector('[data-act="pw"]').addEventListener('click', async ev => {
-      const pw = prompt(`Neues Passwort für ${u.name} (mind. ${Auth.MIN_PASSWORD} Zeichen):`);
-      if (pw === null) return;
-      const problem = passwordProblem(pw);
-      if (problem) return alert(problem);
-      if (await act(() => Auth.resetPassword(u, pw), `Passwort von ${u.name} geändert`, ev.currentTarget)) renderAdmin();
-    });
+  modal.querySelector('[data-act="lock"]')?.addEventListener('click', ev => {
+    const lock = u.active !== false;
+    if (lock && Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
+    act(() => Auth.updateMember(u, { active: !lock }), lock ? `${u.name} gesperrt` : `${u.name} entsperrt`, ev.currentTarget);
+  });
 
-    card.querySelector('[data-act="lock"]')?.addEventListener('click', async ev => {
-      const lock = u.active !== false;
-      if (lock && Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
-      if (await act(() => Auth.updateMember(u, { active: !lock }), lock ? `${u.name} gesperrt` : `${u.name} entsperrt`, ev.currentTarget)) renderAdmin();
-    });
-
-    card.querySelector('[data-act="del"]')?.addEventListener('click', async ev => {
-      if (Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
-      if (!confirm(`Benutzer „${u.name}“ löschen? Der Zugang wird sofort ungültig. Bereits erfasste Einträge bleiben erhalten.`)) return;
-      if (await act(() => Auth.deleteMember(u), `${u.name} gelöscht`, ev.currentTarget)) renderAdmin();
-    });
+  modal.querySelector('[data-act="del"]')?.addEventListener('click', ev => {
+    if (Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
+    if (!confirm(`Benutzer „${u.name}“ löschen? Der Zugang wird sofort ungültig. Bereits erfasste Einträge bleiben erhalten.`)) return;
+    act(() => Auth.deleteMember(u), `${u.name} gelöscht`, ev.currentTarget, 'list');
   });
 }
 

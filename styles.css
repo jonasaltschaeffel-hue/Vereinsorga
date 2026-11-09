@@ -9,18 +9,33 @@
   --danger: #b3261e;
   --ok: #1e7a3c;
   --radius: 14px;
+  color-scheme: light;
+}
+/* Dunkler Modus: „Dunkel“ in den Einstellungen – oder „Automatisch“, wenn das Gerät dunkel eingestellt ist */
+:root[data-theme="dark"] {
+  --bg: #0b0e12;
+  --card: #161c24;
+  --text: #e6ebf1;
+  --muted: #9aa7b6;
+  --line: #2a3441;
+  --primary: #4a8fdc;
+  --primary-text: #0b1420;
+  --danger: #ef6b62;
+  --ok: #5cc27c;
+  color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #11161d;
-    --card: #1b232d;
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --bg: #0b0e12;
+    --card: #161c24;
     --text: #e6ebf1;
     --muted: #9aa7b6;
-    --line: #2c3744;
+    --line: #2a3441;
     --primary: #4a8fdc;
     --primary-text: #0b1420;
     --danger: #ef6b62;
     --ok: #5cc27c;
+    color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
@@ -237,7 +252,17 @@ main:has(.cal-grid) { max-width: 1200px; }
 .cal-bar { width: 5px; align-self: stretch; border-radius: 3px; background: var(--c); flex: none; }
 .cal-item .grow strong { display: block; }
 .cal-item .grow .muted { font-size: 14px; }
-.upcoming { margin-top: 14px; }
+.upcoming { margin: 14px 0; }
+
+/* Einstellungen: Umschalter & Widget */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.seg label { margin: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: inline-block; padding: 8px 14px; border-radius: 9px; cursor: pointer; color: var(--text); font-size: 15px; }
+.seg input:checked + span { background: var(--primary); color: var(--primary-text); }
+.seg input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
+.widget-opts > .row { margin-top: 12px; }
+i.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
 .upcoming .card-head { flex-wrap: wrap; }
 .up-date { display: block; font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .up-date.is-today { color: var(--primary); }
@@ -277,6 +302,38 @@ fieldset.scope legend { font-size: 14px; color: var(--muted); padding: 0 4px; }
 .cat-list li { gap: 8px; }
 .cat-list input[type=color], #catNew input[type=color] { width: 44px; height: 40px; padding: 2px; flex: none; }
 .cat-list input.grow { flex: 1; }
+
+/* ---------- Admin ---------- */
+.admin-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 600px) { .admin-stats { grid-template-columns: repeat(2, 1fr); } }
+.stat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; cursor: pointer; text-align: left;
+  background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); font: inherit;
+}
+.stat strong { font-size: 26px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 14px; }
+.stat.attention { border-color: #d68a00; border-width: 2px; }
+.stat.attention strong { color: #d68a00; }
+.modal.wide { max-width: 1000px; }
+.modal.wide #userSearch { margin-top: 4px; }
+.user-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 14px; }
+.user-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px; cursor: pointer; text-align: left;
+  background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); font: inherit; min-width: 0;
+}
+.user-tile:hover { border-color: var(--primary); }
+.user-tile strong { font-size: 16px; overflow-wrap: anywhere; }
+.user-tile small { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.user-tile.waiting { border-color: #d68a00; border-width: 2px; }
+.user-tile.locked { opacity: .55; }
+.user-tile .tags .tag:first-child, .modal-head .tags .tag:first-child { margin-left: 0; }
+.avatar {
+  width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); font-weight: 700; font-size: 17px;
+}
+.sub-title { font-size: 15px; margin: 18px 0 4px; color: var(--muted); font-weight: 600; }
+.action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.modal-head .icon-btn.back { font-size: 22px; color: var(--text); padding: 2px 8px 2px 0; }
 
 /* Bearbeiten in der Eingabezeile */
 .add-form.editing input { border-color: var(--primary); border-width: 2px; }

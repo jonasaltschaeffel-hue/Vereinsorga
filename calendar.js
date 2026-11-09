@@ -241,12 +241,27 @@ async function renderKalender() {
 }
 
 // ---------- Startseiten-Widget: nächste Termine ----------
-const UPCOMING_DAYS = 90;   // so weit in die Zukunft schauen
-const UPCOMING_MAX = 6;     // so viele Termine anzeigen
+// Anpassbar in den Einstellungen; gespeichert pro Benutzer auf diesem Gerät.
+// cats: null = alle Kategorien, sonst Liste der Kategorie-IDs ('' = ohne Kategorie)
+const WIDGET_DEFAULTS = { show: true, title: 'Nächste Termine', count: 6, days: 90, position: 'below',
+  cats: null, showTime: true, showLocation: true };
+const widgetKey = () => 'widget.' + (Auth.user()?.uid || '');
+function widgetPrefs() {
+  try { return { ...WIDGET_DEFAULTS, ...JSON.parse(localStorage.getItem(widgetKey()) || '{}') }; }
+  catch { return { ...WIDGET_DEFAULTS }; }
+}
+function saveWidgetPrefs(p) { localStorage.setItem(widgetKey(), JSON.stringify(p)); }
 
 async function upcomingWidget() {
-  const { cats, events } = await loadCalendar();
+  const prefs = widgetPrefs();
+  if (!prefs.show) return null;
+  const UPCOMING_DAYS = Math.max(1, Number(prefs.days) || 90);
+  const UPCOMING_MAX = Math.max(1, Number(prefs.count) || 6);
+  const { cats, events: allEvents } = await loadCalendar();
   const catMap = new Map(cats.map(c => [c.id, c]));
+  const events = prefs.cats
+    ? allEvents.filter(ev => prefs.cats.includes(catMap.has(ev.categoryId) ? ev.categoryId : ''))
+    : allEvents;
   const today = Cal.todayKey();
   const tomorrow = Cal.addDays(today, 1);
   const until = Cal.addDays(today, UPCOMING_DAYS);
@@ -271,7 +286,7 @@ async function upcomingWidget() {
   const html = `
     <div class="card upcoming">
       <div class="card-head">
-        <h2>📅 Nächste Termine</h2>
+        <h2>📅 ${esc(prefs.title || WIDGET_DEFAULTS.title)}</h2>
         <a class="btn small" href="#/kalender">Zum Kalender</a>
       </div>
       ${shown.length ? `<ul class="list">${shown.map((x, i) => {
@@ -285,7 +300,10 @@ async function upcomingWidget() {
             <span class="grow">
               <span class="up-date ${x.occ === today || x.running ? 'is-today' : ''}">${esc(when)}</span>
               <strong>${esc(x.ev.title)}</strong>
-              <span class="muted">${timeText(x.ev)}${x.ev.location ? ' · ' + esc(x.ev.location) : ''}</span></span>
+              ${(() => {
+                const meta = [prefs.showTime ? timeText(x.ev) : '', prefs.showLocation && x.ev.location ? esc(x.ev.location) : ''].filter(Boolean);
+                return meta.length ? `<span class="muted">${meta.join(' · ')}</span>` : '';
+              })()}</span>
             <span class="muted">›</span>
           </li>`;
       }).join('')}</ul>
@@ -303,7 +321,7 @@ async function upcomingWidget() {
     sessionStorage.setItem('calMonth', calState.month);
     location.hash = '#/kalender';
   }));
-  return { html, bind };
+  return { html, bind, position: prefs.position };
 }
 
 // ---------- Dialog-Fenster ----------
