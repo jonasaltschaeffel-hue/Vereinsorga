@@ -823,13 +823,16 @@ async function renderAusgabe() {
       $('kSelected').innerHTML = '<div class="pick-hint">Bitte zuerst eine Person auswählen</div>';
       return;
     }
-    const mine = entries.filter(e => e.personId === p.id && !paidIds.has(e.id));
+    // Zahlungen sieht nur, wer Abrechnung oder Statistik darf – Helfer sehen stattdessen „heute“.
+    const seesPaid = Auth.can('abrechnung') || Auth.can('statistik');
+    const today = dayKey(new Date().toISOString());
+    const mine = entries.filter(e => e.personId === p.id && (seesPaid ? !paidIds.has(e.id) : dayKey(e.createdAt) === today));
     const sum = mine.reduce((s, e) => s + e.qty * (e.price || 0), 0);
     const qty = mine.reduce((s, e) => s + e.qty, 0);
     $('kSelected').innerHTML = `
       <div class="selected-banner">
         <div class="grow"><strong>${esc(p.name)}</strong>${p.group ? ` <span class="muted">· ${esc(p.group)}</span>` : ''}
-          <div class="muted">offen: ${qty} Getränke · ${euro(sum)}</div></div>
+          <div class="muted">${seesPaid ? 'offen' : 'heute'}: ${qty} Getränke · ${euro(sum)}</div></div>
         <button class="btn" id="kChange">Person wechseln</button>
       </div>`;
     $('kChange').onclick = () => selectPerson(null);
@@ -973,10 +976,29 @@ setInterval(() => {
 }, 1000);
 
 // ---------- Einstellungen ----------
+function syncText(s) {
+  const wait = s.pending ? ` – ${s.pending} ${s.pending === 1 ? 'Änderung wartet' : 'Änderungen warten'} auf das Hochladen` : '';
+  if (s.status === 'syncing') return 'Abgleich läuft …';
+  if (s.status === 'offline') return 'Keine Internetverbindung' + wait + '. Abgleich, sobald wieder Internet da ist.';
+  if (s.status === 'error') return `Abgleich fehlgeschlagen (${s.error})${wait}.`;
+  if (s.last) return `Alles abgeglichen (zuletzt ${time(s.last)} Uhr)${wait}.`;
+  return 'Noch nicht abgeglichen' + wait + '.';
+}
+
 async function renderEinstellungen() {
   setTitle('Einstellungen', '#/');
-  const count = (await DB.allRecords()).filter(r => !r.deleted).length;
+  const count = (await DB.allRecords()).filter(r => !r.deleted && DB.SYNC_TYPES.includes(r.type)).length;
   view.innerHTML = `
+    <div class="card">
+      <h2>Abgleich zwischen den Geräten</h2>
+      <p id="syncInfo">${esc(syncText(Sync.state()))}</p>
+      <div class="row">
+        <button class="btn primary shrink" id="syncNow">Jetzt abgleichen</button>
+        ${Auth.can('admin') ? '<button class="btn shrink" id="uploadAll">Alle Daten dieses Geräts hochladen</button>' : ''}
+      </div>
+      ${Auth.can('admin') ? `<p class="muted" style="margin:10px 0 0;font-size:14px">„Alle Daten dieses Geräts hochladen“ brauchst du nur einmal,
+        um Daten zu übernehmen, die vor dem Abgleich erfasst wurden – z. B. nach dem Import einer alten Sicherung.</p>` : ''}
+    </div>
     <div class="card">
       <h2>Dieses Gerät</h2>
       <form id="devForm" class="row">
@@ -986,9 +1008,10 @@ async function renderEinstellungen() {
       </form>
     </div>
     <div class="card">
-      <h2>Daten sichern &amp; austauschen</h2>
-      <p class="muted">Auf diesem Gerät gespeichert: ${count} Einträge. Exportiere eine Sicherung und importiere sie auf
-      einem anderen Gerät – vorhandene Daten werden dabei zusammengeführt, nichts wird doppelt angelegt.</p>
+      <h2>Sicherung</h2>
+      <p class="muted">Auf diesem Gerät gespeichert: ${count} Einträge. Eine Sicherung ist eine Datei mit allen Daten –
+      zum Aufbewahren oder um alte Daten (z. B. von localhost) zu übernehmen. Beim Import wird zusammengeführt,
+      nichts wird doppelt angelegt.</p>
       <div class="row">
         <button class="btn primary shrink" id="exp">Sicherung exportieren</button>
         <label class="btn shrink" style="margin:0;color:var(--text);font-size:16px">Sicherung importieren
@@ -1001,17 +1024,25 @@ async function renderEinstellungen() {
       iPhone/iPad: Safari → Teilen → „Zum Home-Bildschirm“.<br>
       Android: Chrome → Menü → „App installieren“.<br>
       Windows: Edge/Chrome → Installieren-Symbol in der Adressleiste.<br>
-      Danach funktioniert sie ohne Internet.</p>
+      Danach funktioniert sie ohne Internet; Änderungen werden abgeglichen, sobald wieder Internet da ist.</p>
     </div>
   `;
 
+  document.getElementById('syncNow').addEventListener('click', () => Sync.run());
+  document.getElementById('uploadAll')?.addEventListener('click', async () => {
+    if (!confirm('Alle Personen, Getränke, Ausgaben und Zahlungen dieses Geräts nach Firebase hochladen?\nVorhandene neuere Daten werden dabei nicht überschrieben.')) return;
+    const n = await DB.markAllPending();
+    toast(`${n} Einträge zum Hochladen vorgemerkt`);
+    Sync.run();
+  });
   document.getElementById('devForm').addEventListener('submit', ev => {
     ev.preventDefault();
     localStorage.setItem('deviceName', document.getElementById('dev').value.trim());
     toast('Gerätename gespeichert');
   });
   document.getElementById('exp').addEventListener('click', async () => {
-    const data = { app: 'vereinsorga', version: 1, exportedAt: new Date().toISOString(), device: DB.deviceName(), records: await DB.allRecords() };
+    const records = (await DB.allRecords()).filter(r => DB.SYNC_TYPES.includes(r.type)).map(({ _pending, ...r }) => r);
+    const data = { app: 'vereinsorga', version: 2, exportedAt: new Date().toISOString(), device: DB.deviceName(), records };
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     download(`vereinsorga_${stamp}.json`, JSON.stringify(data, null, 1), 'application/json');
   });
@@ -1021,8 +1052,9 @@ async function renderEinstellungen() {
     try {
       const data = JSON.parse(await file.text());
       if (data.app !== 'vereinsorga' || !Array.isArray(data.records)) throw new Error('Keine Vereinsorga-Sicherung');
-      const { added, updated } = await DB.merge(data.records);
-      toast(`Import: ${added} neu, ${updated} aktualisiert`);
+      // Benutzer aus alten Sicherungen werden nicht übernommen – die liegen jetzt in Firebase.
+      const { added, updated } = await DB.merge(data.records.filter(r => DB.SYNC_TYPES.includes(r.type)));
+      toast(`Import: ${added} neu, ${updated} aktualisiert – wird hochgeladen`);
       renderEinstellungen();
     } catch (e) {
       alert('Import fehlgeschlagen: ' + e.message);
@@ -1030,7 +1062,7 @@ async function renderEinstellungen() {
   });
 }
 
-// ---------- Anmeldung, Erst-Einrichtung, Notfall-Code ----------
+// ---------- Anmeldung & Erst-Einrichtung ----------
 const userBtn = document.getElementById('userBtn');
 
 // Navigiert zu einer Seite; ist sie schon offen, wird sie neu aufgebaut.
@@ -1044,7 +1076,9 @@ function updateUserBtn() {
   if (u) userBtn.textContent = '👤 ' + u.name;
 }
 userBtn.addEventListener('click', () => {
-  if (!confirm(`${Auth.user().name} abmelden?`)) return;
+  const s = Sync.state();
+  const warn = s.pending ? `\n\nAchtung: ${s.pending} Änderungen sind noch nicht hochgeladen. Sie werden hochgeladen, sobald sich hier wieder jemand online anmeldet.` : '';
+  if (!confirm(`${Auth.user().name} abmelden?${warn}`)) return;
   Auth.logout();
   go('#/');
 });
@@ -1078,10 +1112,15 @@ const passwordProblem = (pw, pw2) =>
   pw.length < Auth.MIN_PASSWORD ? `Das Passwort braucht mindestens ${Auth.MIN_PASSWORD} Zeichen.`
   : pw2 !== undefined && pw !== pw2 ? 'Die beiden Passwörter stimmen nicht überein.' : '';
 
-async function importBackupFile(file) {
-  const data = JSON.parse(await file.text());
-  if (data.app !== 'vereinsorga' || !Array.isArray(data.records)) throw new Error('Keine Vereinsorga-Sicherung');
-  return DB.merge(data.records);
+// Verständliche Meldungen für Firebase-Fehler
+function fbMessage(e) {
+  const c = String(e.code || e.message || '');
+  if (c === 'NETWORK') return 'Keine Internetverbindung.';
+  if (c.startsWith('WEAK_PASSWORD')) return `Das Passwort ist zu schwach (mindestens ${Auth.MIN_PASSWORD} Zeichen).`;
+  if (c === 'PERMISSION_DENIED') return 'Der Server hat das abgelehnt (fehlende Rechte – oder die Zugriffsregeln sind noch nicht veröffentlicht).';
+  if (c === 'CONFIGURATION_NOT_FOUND' || c.startsWith('OPERATION_NOT_ALLOWED')) return 'In Firebase ist die Anmeldung mit E-Mail/Passwort noch nicht eingeschaltet.';
+  if (c === 'NO_SESSION') return 'Bitte einmal ab- und mit Internet wieder anmelden.';
+  return e.message || c;
 }
 
 function renderNoCrypto() {
@@ -1090,22 +1129,33 @@ function renderNoCrypto() {
     <strong>http://localhost</strong> (auf dem PC) geöffnet wird.</p>`);
 }
 
+function renderBlocked() {
+  authShell(`<h2>Server noch nicht bereit</h2>
+    <p>Firebase lehnt den Zugriff ab. Meist sind die Zugriffsregeln noch nicht veröffentlicht
+    (Firebase-Konsole → Firestore Database → Regeln).</p>
+    <button class="btn primary wide" id="retry">Erneut versuchen</button>`);
+  document.getElementById('retry').addEventListener('click', () => route());
+}
+
+function renderOfflineFirstStart() {
+  authShell(`<h2>Internet nötig</h2>
+    <p>Beim ersten Start auf einem Gerät braucht die App einmal eine Internetverbindung.</p>
+    <button class="btn primary wide" id="retry">Erneut versuchen</button>`);
+  document.getElementById('retry').addEventListener('click', () => route());
+}
+
 function renderSetup() {
   authShell(`
     <h2>Willkommen!</h2>
-    <p class="muted">Lege das erste Konto an. Es bekommt automatisch Admin-Rechte – damit kannst du danach
-    weitere Benutzer anlegen und Rechte vergeben.</p>
+    <p class="muted">Lege das erste Konto an. Es bekommt Admin-Rechte und gilt danach auf allen Geräten –
+    damit legst du weitere Benutzer an und vergibst Rechte.</p>
     <form id="setupForm">
       <label for="sName">Name</label><input id="sName" autocomplete="username" required>
       ${pwField('sPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}
       ${pwField('sPw2', 'Passwort wiederholen', 'new-password')}
       <p class="form-error" hidden></p>
       <button class="btn primary wide" type="submit">Admin-Konto anlegen</button>
-    </form>
-    <div class="auth-alt">
-      <p class="muted">Benutzer schon auf einem anderen Gerät angelegt? Dann dort eine Sicherung exportieren und hier importieren.</p>
-      <label class="btn wide">Sicherung importieren<input type="file" id="setupImport" accept=".json,application/json" hidden></label>
-    </div>`);
+    </form>`);
   bindPwToggles();
   document.getElementById('setupForm').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -1113,43 +1163,24 @@ function renderSetup() {
     const pw = document.getElementById('sPw').value;
     const problem = !name ? 'Bitte einen Namen eingeben.' : passwordProblem(pw, document.getElementById('sPw2').value);
     if (problem) return formError(problem);
-    ev.submitter && (ev.submitter.disabled = true);
-    const user = await Auth.createUser(name, pw, ['admin']);
-    Auth.signIn(user, false);
-    const code = Auth.newRecoveryCode();
-    await Auth.setRecoveryCode(code);
-    renderRecoveryCode(code);
-  });
-  document.getElementById('setupImport').addEventListener('change', async ev => {
-    const file = ev.target.files[0];
-    if (!file) return;
+    const btn = ev.submitter;
+    if (btn) { btn.disabled = true; btn.textContent = 'Wird angelegt …'; }
     try {
-      const { added, updated } = await importBackupFile(file);
-      const hasUsers = (await DB.all('user')).length > 0;
-      toast(hasUsers ? `Sicherung importiert (${added} neu, ${updated} aktualisiert) – bitte anmelden` : 'Die Sicherung enthält keine Benutzer.');
-      route();
-    } catch (e) { alert('Import fehlgeschlagen: ' + e.message); }
+      await Auth.createFirstAdmin(name, pw);
+      toast(`Willkommen, ${name}!`);
+      go('#/');
+      Sync.run();
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Admin-Konto anlegen'; }
+      formError(fbMessage(e));
+    }
   });
 }
 
-function renderRecoveryCode(code) {
-  updateUserBtn();
-  authShell(`
-    <h2>Dein Notfall-Code</h2>
-    <p>Mit diesem Code kann ein Admin-Passwort zurückgesetzt werden, falls es vergessen wird.
-    <strong>Schreib ihn auf und bewahre ihn sicher auf</strong> – er wird nur jetzt angezeigt.</p>
-    <div class="code-box">${code}</div>
-    <label class="check"><input type="checkbox" id="noted"> Ich habe den Code notiert</label>
-    <button class="btn primary wide" id="codeDone" disabled>Weiter</button>`);
-  document.getElementById('noted').addEventListener('change', ev => {
-    document.getElementById('codeDone').disabled = !ev.target.checked;
-  });
-  document.getElementById('codeDone').addEventListener('click', () => go('#/'));
-}
-
-function renderLogin() {
+function renderLogin(offline) {
   authShell(`
     <h2>Anmelden</h2>
+    ${offline ? '<p class="muted">Keine Internetverbindung – anmelden können sich Benutzer, die auf diesem Gerät schon einmal online angemeldet waren.</p>' : ''}
     <form id="loginForm">
       <label for="lName">Name</label><input id="lName" autocomplete="username" required>
       ${pwField('lPw', 'Passwort', 'current-password')}
@@ -1165,14 +1196,16 @@ function renderLogin() {
     ev.preventDefault();
     const btn = ev.submitter;
     if (btn) { btn.disabled = true; btn.textContent = 'Prüfe …'; }
-    const user = await Auth.login(document.getElementById('lName').value, document.getElementById('lPw').value,
+    const res = await Auth.login(document.getElementById('lName').value, document.getElementById('lPw').value,
       document.getElementById('lKeep').checked);
-    if (!user) {
+    if (res.error) {
       if (btn) { btn.disabled = false; btn.textContent = 'Anmelden'; }
       document.getElementById('lPw').value = '';
-      return formError('Name oder Passwort falsch – oder das Konto ist gesperrt.');
+      return formError(res.error);
     }
+    if (res.offline) toast('Offline angemeldet – Abgleich, sobald Internet da ist');
     route();
+    Sync.run();
   });
   document.getElementById('forgot').addEventListener('click', renderForgot);
 }
@@ -1180,37 +1213,29 @@ function renderLogin() {
 function renderForgot() {
   authShell(`
     <h2>Passwort vergessen</h2>
-    <p class="muted">Benutzer: Bitte einen Admin, dein Passwort neu zu setzen.<br>
-    Admins: Mit dem Notfall-Code kannst du hier ein neues Passwort setzen.</p>
-    <form id="forgotForm">
-      <label for="fCode">Notfall-Code</label><input id="fCode" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" required>
-      <label for="fName">Name des Admin-Kontos</label><input id="fName" autocomplete="username" required>
-      ${pwField('fPw', 'Neues Passwort', 'new-password')}
-      ${pwField('fPw2', 'Neues Passwort wiederholen', 'new-password')}
-      <p class="form-error" hidden></p>
-      <button class="btn primary wide" type="submit">Passwort zurücksetzen</button>
-    </form>
-    <button class="link-btn" id="back" type="button">Zurück zur Anmeldung</button>`);
-  bindPwToggles();
-  document.getElementById('back').addEventListener('click', renderLogin);
-  document.getElementById('forgotForm').addEventListener('submit', async ev => {
-    ev.preventDefault();
-    const pw = document.getElementById('fPw').value;
-    const problem = passwordProblem(pw, document.getElementById('fPw2').value);
-    if (problem) return formError(problem);
-    if (!await Auth.checkRecoveryCode(document.getElementById('fCode').value)) return formError('Der Notfall-Code stimmt nicht.');
-    const user = await Auth.findByName(document.getElementById('fName').value);
-    if (!user || !(user.perms || []).includes('admin')) return formError('Es gibt kein Admin-Konto mit diesem Namen.');
-    await Auth.setPassword({ ...user, active: true }, pw);
-    toast('Passwort geändert – bitte anmelden');
-    renderLogin();
-  });
+    <p><strong>Benutzer:</strong> Bitte einen Admin, dir unter <em>Admin → Passwort neu setzen</em> ein neues Passwort zu geben.</p>
+    <p><strong>Einziger Admin:</strong> Öffne die Firebase-Konsole → <em>Firestore Database</em> → Sammlung <code>config</code>
+    und lösche das Dokument <code>setup</code>. Danach zeigt die App wieder die Erst-Einrichtung und du legst ein
+    neues Admin-Konto an. Alle Daten bleiben erhalten.</p>
+    <button class="btn wide" id="back" type="button">Zurück zur Anmeldung</button>`);
+  document.getElementById('back').addEventListener('click', () => renderLogin(!navigator.onLine));
 }
 
 // ---------- Admin: Benutzer & Rechte ----------
 async function renderAdmin() {
   setTitle('Admin', '#/');
-  const users = await Auth.users();
+  view.innerHTML = '<div class="card"><p class="muted" style="margin:0">Benutzer werden geladen …</p></div>';
+  let users;
+  try {
+    users = await Auth.listMembers();
+  } catch (e) {
+    view.innerHTML = `<div class="card"><h2>Keine Verbindung</h2>
+      <p>Die Benutzerverwaltung braucht eine Internetverbindung.</p>
+      <p class="muted">${esc(fbMessage(e))}</p>
+      <button class="btn primary" id="retry">Erneut versuchen</button></div>`;
+    document.getElementById('retry').addEventListener('click', renderAdmin);
+    return;
+  }
   const me = Auth.user();
   const permBoxes = (name, perms) => Auth.PERMS.map(([k, l]) => `
     <label class="check"><input type="checkbox" name="${name}" value="${k}" ${perms.includes(k) ? 'checked' : ''}> ${l}</label>`).join('');
@@ -1231,34 +1256,42 @@ async function renderAdmin() {
     </div>
     <h2 class="section-title">Benutzer (${users.length})</h2>
     ${users.map(u => `
-      <div class="card user-card ${u.active === false ? 'locked' : ''}" data-id="${u.id}">
+      <div class="card user-card ${u.active === false ? 'locked' : ''}" data-id="${u.uid}">
         <div class="bill-head">
           <div class="grow"><strong>${esc(u.name)}</strong>
-            ${u.id === me.id ? '<span class="tag">Du</span>' : ''}
+            ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
             ${(u.perms || []).includes('admin') ? '<span class="tag">Admin</span>' : ''}
             ${u.active === false ? '<span class="tag warn">gesperrt</span>' : ''}</div>
           <button class="btn small" data-act="pw">Passwort neu setzen</button>
-          ${u.id !== me.id ? `
+          ${u.uid !== me.uid ? `
             <button class="btn small" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
             <button class="btn small danger" data-act="del">Löschen</button>` : ''}
         </div>
         <div class="perm-grid">${permBoxes('perm', u.perms || [])}</div>
       </div>`).join('')}
     <div class="card">
-      <h2>Notfall-Code</h2>
-      <p class="muted">Damit kann ein Admin-Passwort über „Passwort vergessen?“ zurückgesetzt werden.
-      Ein neuer Code macht den bisherigen ungültig.</p>
-      <button class="btn" id="newCode">Neuen Notfall-Code erzeugen</button>
-      <div id="codeOut"></div>
-    </div>
-    <div class="card">
       <h2>Gut zu wissen</h2>
-      <p class="muted" style="margin:0">Benutzer und Rechte sind auf diesem Gerät gespeichert. Auf andere Geräte kommen sie
-      mit „Sicherung exportieren“ und „Sicherung importieren“ in den Einstellungen. Admins dürfen immer alles.</p>
+      <p class="muted" style="margin:0">Benutzer und Rechte sind in Firebase gespeichert und gelten auf allen Geräten.
+      Änderungen wirken beim nächsten Abgleich (online spätestens nach 30 Sekunden). Ein Gerät, das gerade offline ist,
+      bemerkt eine Sperre erst, wenn es wieder Internet hat. Admins dürfen immer alles.</p>
     </div>`;
   bindPwToggles();
 
   const activeAdmins = () => users.filter(u => Auth.isAdmin(u));
+  // Führt eine Admin-Aktion aus und zeigt Fehler verständlich an
+  const act = async (fn, okMsg, el) => {
+    if (el) el.disabled = true;
+    try {
+      await fn();
+      if (okMsg) toast(okMsg);
+      return true;
+    } catch (e) {
+      alert(fbMessage(e));
+      return false;
+    } finally {
+      if (el) el.disabled = false;
+    }
+  };
 
   document.getElementById('newUser').addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -1266,16 +1299,13 @@ async function renderAdmin() {
     const pw = document.getElementById('nuPw').value;
     const perms = [...view.querySelectorAll('[name="nuPerm"]:checked')].map(c => c.value);
     const problem = !name ? 'Bitte einen Namen eingeben.'
-      : await Auth.findByName(name) ? `Es gibt schon einen Benutzer „${name}“.`
       : passwordProblem(pw) || (!perms.length ? 'Bitte mindestens ein Recht auswählen.' : '');
     if (problem) return formError(problem);
-    await Auth.createUser(name, pw, perms);
-    toast(`Benutzer ${name} angelegt`);
-    renderAdmin();
+    if (await act(() => Auth.createMember(name, pw, perms), `Benutzer ${name} angelegt`, ev.submitter)) renderAdmin();
   });
 
   view.querySelectorAll('.user-card').forEach(card => {
-    const u = users.find(x => x.id === card.dataset.id);
+    const u = users.find(x => x.uid === card.dataset.id);
 
     card.querySelectorAll('[name="perm"]').forEach(box => box.addEventListener('change', async () => {
       const perms = [...card.querySelectorAll('[name="perm"]:checked')].map(c => c.value);
@@ -1284,60 +1314,46 @@ async function renderAdmin() {
         box.checked = true;
         return alert('Es muss immer mindestens einen Admin geben.');
       }
-      if (losesAdmin && u.id === me.id &&
+      if (losesAdmin && u.uid === me.uid &&
         !confirm('Du nimmst dir selbst die Admin-Rechte. Danach kannst du diese Seite nicht mehr öffnen. Fortfahren?')) {
         box.checked = true;
         return;
       }
-      await DB.save('user', { ...u, perms });
-      toast(`Rechte von ${u.name} gespeichert`);
-      if (losesAdmin && u.id === me.id) return go('#/');
+      if (!await act(() => Auth.updateMember(u, { perms }), `Rechte von ${u.name} gespeichert`)) { box.checked = !box.checked; return; }
+      if (u.uid === me.uid) { await Sync.run(); if (losesAdmin) return go('#/'); }
       renderAdmin();
     }));
 
-    card.querySelector('[data-act="pw"]').addEventListener('click', async () => {
+    card.querySelector('[data-act="pw"]').addEventListener('click', async ev => {
       const pw = prompt(`Neues Passwort für ${u.name} (mind. ${Auth.MIN_PASSWORD} Zeichen):`);
       if (pw === null) return;
       const problem = passwordProblem(pw);
       if (problem) return alert(problem);
-      await Auth.setPassword(u, pw);
-      toast(`Passwort von ${u.name} geändert`);
+      if (await act(() => Auth.resetPassword(u, pw), `Passwort von ${u.name} geändert`, ev.currentTarget)) renderAdmin();
     });
 
-    card.querySelector('[data-act="lock"]')?.addEventListener('click', async () => {
+    card.querySelector('[data-act="lock"]')?.addEventListener('click', async ev => {
       const lock = u.active !== false;
       if (lock && Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
-      await DB.save('user', { ...u, active: !lock });
-      toast(lock ? `${u.name} gesperrt` : `${u.name} entsperrt`);
-      renderAdmin();
+      if (await act(() => Auth.updateMember(u, { active: !lock }), lock ? `${u.name} gesperrt` : `${u.name} entsperrt`, ev.currentTarget)) renderAdmin();
     });
 
-    card.querySelector('[data-act="del"]')?.addEventListener('click', async () => {
+    card.querySelector('[data-act="del"]')?.addEventListener('click', async ev => {
       if (Auth.isAdmin(u) && activeAdmins().length <= 1) return alert('Es muss immer mindestens einen Admin geben.');
-      if (!confirm(`Benutzer „${u.name}“ löschen? Bereits erfasste Einträge bleiben erhalten.`)) return;
-      await DB.remove(u);
-      toast(`${u.name} gelöscht`);
-      renderAdmin();
+      if (!confirm(`Benutzer „${u.name}“ löschen? Der Zugang wird sofort ungültig. Bereits erfasste Einträge bleiben erhalten.`)) return;
+      if (await act(() => Auth.deleteMember(u), `${u.name} gelöscht`, ev.currentTarget)) renderAdmin();
     });
-  });
-
-  document.getElementById('newCode').addEventListener('click', async () => {
-    if (!confirm('Neuen Notfall-Code erzeugen? Der bisherige Code wird damit ungültig.')) return;
-    const code = Auth.newRecoveryCode();
-    await Auth.setRecoveryCode(code);
-    document.getElementById('codeOut').innerHTML = `
-      <p style="margin:12px 0 6px"><strong>Neuer Code – jetzt aufschreiben, er wird nur einmal angezeigt:</strong></p>
-      <div class="code-box">${code}</div>`;
   });
 }
 
 // ---------- Router ----------
 // perms: Seite ist erreichbar, wenn der Benutzer mindestens eines dieser Rechte hat.
+// refresh: Variante für das automatische Neuladen nach einem Abgleich.
 const ROUTES = {
   '': { render: renderHome },
   'getraenke': { render: renderGetraenkeStart, perms: DRINK_PERMS },
   'getraenke/einrichtung': { render: renderEinrichtung, perms: ['einrichtung'] },
-  'getraenke/abrechnung': { render: () => renderAbrechnung(true), perms: ['abrechnung'] },
+  'getraenke/abrechnung': { render: () => renderAbrechnung(true), refresh: () => renderAbrechnung(false), perms: ['abrechnung'] },
   'getraenke/bezahlt': { render: renderBezahlt, perms: ['abrechnung'] },
   'getraenke/statistik': { render: renderStatistik, perms: ['statistik'] },
   'ausgabe': { render: renderAusgabe, perms: ['ausgabe'] },
@@ -1352,19 +1368,25 @@ function renderGetraenkeStart() {
 }
 
 let routeRun = 0;
-async function route() {
+async function route(opts = {}) {
   const run = ++routeRun;
   const path = location.hash.replace(/^#\/?/, '');
   editing = null;
   document.body.classList.remove('kiosk-mode');
   try {
     if (!Auth.available()) return renderNoCrypto();
-    const hasUsers = (await DB.all('user')).length > 0;
-    await Auth.restore();
-    if (run !== routeRun) return; // inzwischen wurde schon weiter navigiert
+    if (!Auth.user()) Auth.restore();
     updateUserBtn();
-    if (!hasUsers) { keepAwake(false); return renderSetup(); }
-    if (!Auth.user()) { keepAwake(false); return renderLogin(); }
+    if (!Auth.user()) {
+      keepAwake(false);
+      const status = await Auth.setupStatus();
+      if (run !== routeRun) return; // inzwischen wurde schon weiter navigiert
+      if (status === 'open') return renderSetup();
+      if (status === 'blocked') return renderBlocked();
+      const knownUsers = Object.keys(JSON.parse(localStorage.getItem('fb.members') || '{}')).length;
+      if (status === 'offline' && !knownUsers) return renderOfflineFirstStart();
+      return renderLogin(status === 'offline');
+    }
     const r = ROUTES[path] || ROUTES[''];
     if (!canAny(r.perms)) {
       toast('Dafür fehlt dir die Berechtigung');
@@ -1374,25 +1396,53 @@ async function route() {
     const isKiosk = path === 'ausgabe';
     document.body.classList.toggle('kiosk-mode', isKiosk);
     keepAwake(isKiosk);
-    await r.render();
-    window.scrollTo(0, 0);
+    await (opts.refresh && r.refresh ? r.refresh : r.render)();
+    if (!opts.keepScroll) window.scrollTo(0, 0);
   } catch (err) {
     console.error(err);
     view.innerHTML = `<div class="card"><p>Fehler: ${esc(err.message)}</p></div>`;
   }
 }
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => route());
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && document.body.classList.contains('kiosk-mode')) keepAwake(true);
 });
-route();
 
-// ---------- Offline-Status & Service Worker ----------
+// Nach einem Abgleich mit neuen Daten die Seite auffrischen – aber nicht mitten in einer Eingabe.
+window.addEventListener('sync-changed', () => {
+  if (!Auth.user() || editing) return;
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+  if (document.body.classList.contains('kiosk-mode') && (kiosk.person || kiosk.cart.size)) return;
+  route({ keepScroll: true, refresh: true });
+});
+window.addEventListener('auth-changed', () => route({ keepScroll: true, refresh: true }));
+window.addEventListener('auth-revoked', () => {
+  toast('Dein Konto wurde gesperrt oder gelöscht');
+  go('#/');
+});
+window.addEventListener('sync-rejected', ev => {
+  toast(`${ev.detail} Änderung(en) vom Server abgelehnt – fehlende Rechte`);
+});
+
+// ---------- Abgleich-Anzeige oben rechts & Service Worker ----------
 const badge = document.getElementById('offlineBadge');
-const updateOnline = () => { badge.hidden = navigator.onLine; };
-window.addEventListener('online', updateOnline);
-window.addEventListener('offline', updateOnline);
-updateOnline();
+badge.addEventListener('click', () => { toast(syncText(Sync.state())); Sync.run(); });
+Sync.subscribe(s => {
+  const text = !Auth.user() ? (navigator.onLine ? '' : 'offline')
+    : s.status === 'offline' ? 'offline' + (s.pending ? ` · ${s.pending}` : '')
+    : s.status === 'syncing' ? '⟳'
+    : s.status === 'error' ? '⚠ Abgleich'
+    : s.pending ? `⟳ ${s.pending}` : s.last ? '✓' : '';
+  badge.hidden = !text;
+  badge.textContent = text;
+  badge.title = syncText(s);
+  const info = document.getElementById('syncInfo');
+  if (info) info.textContent = syncText(s);
+});
+
+Sync.start();
+route().then(() => { if (Auth.user()) Sync.run(); });
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service Worker nicht registriert:', err));
