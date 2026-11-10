@@ -4,7 +4,7 @@
 // Läuft nach jeder Änderung (kurz verzögert), alle 30 Sekunden, beim Wiederverbinden und beim Öffnen.
 const Sync = (() => {
   const COLL = { drinkEvent: 'drinkevents', person: 'persons', drink: 'drinks', drinkEntry: 'entries', payment: 'payments',
-    event: 'events', calCategory: 'calcategories', bayParticipant: 'bayparticipants', bayBooking: 'baybookings' };
+    event: 'events', calCategory: 'calcategories', bayParticipant: 'bayparticipants', bayBooking: 'baybookings', cocktail: 'cocktails' };
   const BATCH = 200;      // Schreibvorgänge pro Hochladen
   const PAGE = 300;       // Dokumente pro Abruf (muss größer als BATCH sein)
   const state = { status: 'idle', pending: 0, error: '', last: null };
@@ -18,6 +18,7 @@ const Sync = (() => {
     coll === 'payments' ? ['abrechnung', 'statistik', 'bayairn'].some(p => Auth.can(p))
     : coll === 'events' || coll === 'calcategories' ? Auth.can('kalender') || Auth.can('kalender_bearbeiten')
     : coll === 'bayparticipants' || coll === 'baybookings' ? Auth.can('bayairn')
+    : coll === 'cocktails' ? Auth.can('cocktails') || Auth.can('cocktails_bearbeiten')
     : ['ausgabe', 'einrichtung', 'abrechnung', 'statistik', 'bayairn'].some(p => Auth.can(p));
 
   function schedule(ms = 1500) {

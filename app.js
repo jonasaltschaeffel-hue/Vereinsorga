@@ -10,6 +10,7 @@ const DRINK_PERMS = ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'];
 const MODULES = [
   { href: '#/getraenke', emoji: '🥤', name: 'Getränkevergabe', desc: 'Personen, Getränke, Ausgabe, Abrechnung', perms: DRINK_PERMS },
   { href: '#/bayairn', emoji: '✈️', name: 'BayAirn', desc: 'Teilnehmer, Anmeldung & Konten', perms: ['bayairn'] },
+  { href: '#/cocktails', emoji: '🍹', name: 'Cocktails', desc: 'Rezepte & Getränkekarte', perms: ['cocktails', 'cocktails_bearbeiten'] },
   { href: '#/kalender', emoji: '📅', name: 'Kalender', desc: 'Termine & Veranstaltungen', perms: ['kalender', 'kalender_bearbeiten'] },
   { href: '#/admin', emoji: '🔑', name: 'Admin', desc: 'Benutzer & Rechte', perms: ['admin'] },
   { href: '#/einstellungen', emoji: '⚙️', name: 'Einstellungen', desc: 'Gerät, Sicherung, Import', perms: ['einstellungen'] },
@@ -1701,6 +1702,7 @@ const ROUTES = {
   'ausgabe': { render: renderAusgabe, perms: ['ausgabe'] },
   'kalender': { render: renderKalender, perms: ['kalender', 'kalender_bearbeiten'] },
   'bayairn': { render: renderBayAirn, perms: ['bayairn'] },
+  'cocktails': { render: renderCocktails, perms: ['cocktails', 'cocktails_bearbeiten'] },
   'einstellungen': { render: renderEinstellungen, perms: ['einstellungen'] },
   'admin': { render: renderAdmin, perms: ['admin'] },
 };
@@ -1836,7 +1838,10 @@ async function route(opts = {}) {
       if (status === 'offline' && !knownUsers) return renderOfflineFirstStart();
       return renderLogin(status === 'offline');
     }
-    const r = ROUTES[path] || ROUTES[''];
+    // Seiten mit Parameter, z. B. #/cocktails/<id>
+    const r = ROUTES[path] || (path.startsWith('cocktails/')
+      ? { render: () => renderCocktailDetail(decodeURIComponent(path.slice(10))), perms: ['cocktails', 'cocktails_bearbeiten'] }
+      : ROUTES['']);
     if (!canAny(r.perms)) {
       toast('Dafür fehlt dir die Berechtigung');
       location.replace('#/');
