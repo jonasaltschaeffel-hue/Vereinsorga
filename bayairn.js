@@ -52,12 +52,51 @@ function bayAccount(p, ctx) {
   }
   for (const pay of ctx.payments) {
     if (personIds.has(pay.personId)) {
-      items.push({ date: pay.createdAt.slice(0, 10), text: 'Getränke bezahlt (Getränkevergabe)', amount: -pay.sum, kind: 'getraenkezahlung' });
+      items.push({ date: pay.createdAt.slice(0, 10), amount: -pay.sum, kind: 'getraenkezahlung', pay,
+        text: `Getränke bezahlt – ${bayEventName(ctx, pay.eventId)}${pay.bayGroup ? ' (über BayAirn)' : ' (in der Getränkevergabe)'}` });
     }
   }
   items.sort((a, b) => a.date.localeCompare(b.date));
   const saldo = Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100;
   return { items, saldo };
+}
+
+// Offene (noch nicht bezahlte) Getränke eines Teilnehmers, je verknüpfter Person
+function bayOpenDrinks(p, ctx) {
+  const paidIds = new Set(ctx.payments.flatMap(x => x.entryIds || []));
+  return ctx.persons.filter(x => x.participantId === p.id).map(person => {
+    const open = ctx.entries.filter(e => e.personId === person.id && !paidIds.has(e.id));
+    return { person, open, sum: open.reduce((s, e) => s + e.qty * (e.price || 0), 0) };
+  }).filter(x => x.open.length);
+}
+
+// „Alles bezahlt“: offene Getränke in der Getränkevergabe als bezahlt markieren
+// und den Rest als Zahlung buchen. Alle Teile tragen dieselbe bayGroup – so lässt
+// sich die Zahlung auf beiden Seiten gemeinsam zurücknehmen.
+async function bayPayAll(p, ctx, saldo) {
+  const gid = DB.uuid();
+  const date = new Date().toISOString().slice(0, 10);
+  let drinkSum = 0;
+  for (const { person, open } of bayOpenDrinks(p, ctx)) {
+    const [b] = summarizeByPerson(open, [person]);
+    drinkSum += b.sum;
+    await DB.save('payment', {
+      eventId: person.eventId || '', personId: person.id, name: b.name, group: b.group || '', qty: b.qty,
+      sum: Math.round(b.sum * 100) / 100, lines: b.lines, items: b.items.map(({ id, ...rest }) => rest),
+      entryIds: b.items.map(i => i.id), bayGroup: gid, source: 'bayairn',
+    });
+  }
+  const rest = Math.round((saldo - drinkSum) * 100) / 100;
+  if (rest > 0.004) await DB.save('bayBooking', { participantId: p.id, kind: 'zahlung', amount: rest, text: 'Alles bezahlt', date, bayGroup: gid });
+  else if (rest < -0.004) await DB.save('bayBooking', { participantId: p.id, kind: 'kosten', amount: -rest, text: 'Guthaben mit Getränken verrechnet', date, bayGroup: gid });
+  return { drinkSum, rest };
+}
+
+// Eine „Alles bezahlt“-Zahlung auf beiden Seiten zurücknehmen
+async function removeBayGroup(gid) {
+  const [payments, bookings] = await Promise.all([DB.all('payment'), DB.all('bayBooking')]);
+  for (const x of payments) if (x.bayGroup === gid) await DB.remove(x);
+  for (const x of bookings) if (x.bayGroup === gid) await DB.remove(x);
 }
 
 const saldoText = s => s > 0.004 ? `offen ${euro(s)}` : s < -0.004 ? `Guthaben ${euro(-s)}` : 'ausgeglichen';
@@ -211,7 +250,7 @@ async function openBayParticipant(p) {
       <div class="table-wrap"><table class="account">
         <thead><tr><th>Datum</th><th>Posten</th><th class="num">Betrag</th></tr></thead>
         <tbody>${acc.items.length ? acc.items.map((i, n) => `
-          <tr class="${i.rec ? 'editable' : ''}" data-n="${n}">
+          <tr class="${i.rec || i.pay ? 'editable' : ''}" data-n="${n}">
             <td>${new Date(i.date + 'T12:00').toLocaleDateString('de-DE')}</td>
             <td>${esc(i.text)}${i.kind === 'getraenke' || i.kind === 'getraenkezahlung' ? ' <span class="muted">· automatisch</span>' : ''}</td>
             <td class="num ${i.amount < 0 ? 'pos' : ''}">${i.amount < 0 ? '− ' + euro(-i.amount) : euro(i.amount)}</td>
@@ -264,9 +303,25 @@ async function openBayParticipant(p) {
   if (!acc) return;
   $('bCharge').addEventListener('click', () => openBayBooking(p, 'kosten'));
   $('bPay').addEventListener('click', () => openBayBooking(p, 'zahlung'));
-  $('bPayAll')?.addEventListener('click', () => openBayBooking(p, 'zahlung', null, acc.saldo));
-  modal.querySelectorAll('tr.editable').forEach(tr => tr.addEventListener('click', () => {
+  $('bPayAll')?.addEventListener('click', async ev => {
+    const drinks = bayOpenDrinks(p, ctx).reduce((s, x) => s + x.sum, 0);
+    if (!confirm(`Alles bezahlt für ${p.name}?\n\nBetrag: ${euro(acc.saldo)}` +
+      (drinks > 0.004 ? `\ndavon Getränke: ${euro(drinks)} – werden auch in der Getränkevergabe als bezahlt markiert.` : ''))) return;
+    ev.currentTarget.disabled = true;
+    await bayPayAll(p, ctx, acc.saldo);
+    toast(`${p.name}: alles bezahlt`);
+    openBayParticipant(p);
+  });
+  modal.querySelectorAll('tr.editable').forEach(tr => tr.addEventListener('click', async () => {
     const item = acc.items[+tr.dataset.n];
+    if (item.pay) {
+      // Getränkezahlung: nur zurücknehmbar, wenn sie hier über „Alles bezahlt“ entstanden ist
+      if (!item.pay.bayGroup) return alert('Diese Getränke wurden in der Getränkevergabe als bezahlt markiert. Zurücknehmen geht dort unter „Bezahlt“.');
+      if (!confirm('Diese „Alles bezahlt“-Zahlung zurücknehmen? Die Getränke sind dann auch in der Getränkevergabe wieder offen.')) return;
+      await removeBayGroup(item.pay.bayGroup);
+      toast('Zahlung zurückgenommen');
+      return openBayParticipant(p);
+    }
     openBayBooking(p, item.rec.kind, item.rec);
   }));
 }
@@ -324,8 +379,14 @@ function openBayBooking(p, kind, rec, presetAmount) {
     back();
   });
   $('bkDelete')?.addEventListener('click', async () => {
-    if (!confirm('Diese Buchung löschen?')) return;
-    await DB.remove(rec);
+    if (rec.bayGroup) {
+      // Teil einer „Alles bezahlt“-Zahlung: gemeinsam mit den Getränkezahlungen zurücknehmen
+      if (!confirm('Diese Buchung gehört zu „Alles bezahlt“. Löschen nimmt die ganze Zahlung zurück – auch die Getränke sind dann in der Getränkevergabe wieder offen. Fortfahren?')) return;
+      await removeBayGroup(rec.bayGroup);
+    } else {
+      if (!confirm('Diese Buchung löschen?')) return;
+      await DB.remove(rec);
+    }
     toast('Buchung gelöscht');
     back();
   });

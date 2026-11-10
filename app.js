@@ -517,9 +517,9 @@ async function renderAbrechnung(fresh) {
       </div>
     </div>
     <div id="bills">
-      ${bills.map(b => billCard(b, { actions: bayLinked.has(b.id)
-        ? '<span class="tag" title="Wird zusammen mit den übrigen Kosten im BayAirn-Konto bezahlt">✈️ über BayAirn-Konto</span>'
-        : `<button class="btn pay-btn" data-pay="${esc(b.id)}">✓ Bezahlt</button>` })).join('')}
+      ${bills.map(b => billCard(b, {
+        sub: bayLinked.has(b.id) ? '✈️ mit BayAirn-Konto verknüpft – „Bezahlt“ gilt auch dort' : '',
+        actions: `<button class="btn pay-btn" data-pay="${esc(b.id)}">✓ Bezahlt</button>` })).join('')}
       ${justPaid.map(p => billCard(p, {
         cls: 'paid',
         sub: `✓ bezahlt um ${time(p.createdAt)}`,
@@ -595,7 +595,7 @@ async function renderBezahlt() {
       </div>
     </div>
     ${payments.length ? payments.map(p => billCard(p, {
-      sub: `✓ bezahlt ${dateTime(p.createdAt)} Uhr`,
+      sub: `✓ bezahlt ${dateTime(p.createdAt)} Uhr${p.bayGroup ? ' · ✈️ über das BayAirn-Konto' : ''}`,
       actions: `<button class="btn small danger" data-unpay="${p.id}">Zurücknehmen</button>`,
     })).join('') : '<div class="card"><p class="muted" style="margin:0">Noch keine Rechnung bezahlt.</p></div>'}
   `;
@@ -603,8 +603,14 @@ async function renderBezahlt() {
   bindBillSearch('paidSearch', () => paidQuery, q => { paidQuery = q; });
   view.querySelectorAll('[data-unpay]').forEach(btn => btn.addEventListener('click', async () => {
     const p = payments.find(x => x.id === btn.dataset.unpay);
-    if (!confirm(`Zahlung von ${p.name} (${euro(p.sum)}) zurücknehmen?\nDer Betrag erscheint dann wieder in der Abrechnung.`)) return;
-    await DB.remove(p);
+    if (p.bayGroup) {
+      // Über BayAirn „Alles bezahlt“ entstanden: die ganze Zahlung auf beiden Seiten zurücknehmen
+      if (!confirm(`Diese Zahlung von ${p.name} wurde im BayAirn-Konto als „Alles bezahlt“ gebucht.\nZurücknehmen macht die Zahlung dort und hier rückgängig. Fortfahren?`)) return;
+      await removeBayGroup(p.bayGroup);
+    } else {
+      if (!confirm(`Zahlung von ${p.name} (${euro(p.sum)}) zurücknehmen?\nDer Betrag erscheint dann wieder in der Abrechnung.`)) return;
+      await DB.remove(p);
+    }
     toast(`${p.name} wieder offen`);
     renderBezahlt();
   }));
