@@ -5,7 +5,16 @@
 // Ihre Ausgaben erscheinen auf dessen Konto; bezahlt wird über das Konto.
 // Recht: „bayairn“.
 
-const BAY_FUNCS = ['Teilnehmer', 'Betreuer', 'Helfer', 'Leitung', 'Küche'];
+const BAY_FUNCS = ['Teilnehmer', 'Betreuer', 'Helfer', 'LSJ', 'Orga', 'Leitung', 'Küche'];
+
+// Vor- und Nachname: neue Einträge speichern beides getrennt (name = „Vorname Nachname“ für Suche & Getränke).
+// Ältere Einträge mit nur „name“ werden am letzten Leerzeichen aufgeteilt.
+function splitName(p) {
+  if (p.firstName || p.lastName) return { first: p.firstName || '', last: p.lastName || '' };
+  const parts = String(p.name || '').trim().split(/\s+/);
+  return parts.length > 1 ? { first: parts.slice(0, -1).join(' '), last: parts[parts.length - 1] } : { first: parts[0] || '', last: '' };
+}
+const fullName = (first, last) => `${first.trim()} ${last.trim()}`.trim();
 const BAY_SIZES = ['116', '128', '140', '152', '164', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
 const BAY_QUICK = { kosten: ['Teilnehmerbeitrag', 'T-Shirt', 'Ausflug', 'Sonstiges'], zahlung: ['Überweisung', 'Bar bezahlt', 'Anzahlung'] };
 const bayState = { query: '', func: '' };
@@ -83,7 +92,7 @@ async function renderBayAirn() {
         <span class="grow"></span>
         <button class="btn danger" id="bayReset">Liste zurücksetzen</button>
       </div>
-      <p class="muted" style="margin:10px 0 0;font-size:14px">Excel-Spalten: <b>Name</b> (oder Vorname + Nachname), optional
+      <p class="muted" style="margin:10px 0 0;font-size:14px">Excel-Spalten: <b>Vorname</b> und <b>Nachname</b> (oder <b>Name</b> mit beidem), optional
         <b>Gruppe</b>, <b>Alter</b>, <b>Funktion</b>, <b>T-Shirt</b> (ja/nein) und <b>Größe</b>.</p>
     </div>
     ${participants.length ? `
@@ -140,6 +149,7 @@ async function renderBayAirn() {
     try {
       const res = await importBayRows(await Sheet.readFile(file, /teilnehm|anmeld|bayairn|liste/i), participants);
       toast(`Import: ${res.added} neu, ${res.skipped} schon vorhanden`);
+      if (res.noLast) alert(`${res.noLast} Zeile(n) ohne Nachnamen wurden übersprungen. Bitte in der Liste Vor- und Nachnamen ergänzen und erneut importieren.`);
       renderBayAirn();
     } catch (e) { alert('Import fehlgeschlagen: ' + e.message); }
   });
@@ -157,6 +167,7 @@ async function openBayParticipant(p) {
   const groups = [...new Set(ctx.participants.map(x => x.group).filter(Boolean))].sort();
   const acc = isNew ? null : bayAccount(p, ctx);
   const d = p || { name: '', group: '', age: '', func: 'Teilnehmer', tshirt: false, size: '', note: '' };
+  const nm = splitName(d);
   const linked = isNew ? [] : ctx.persons.filter(x => x.participantId === p.id);
 
   const modal = openModal(`
@@ -167,14 +178,18 @@ async function openBayParticipant(p) {
     </div>
     <form id="bayForm" class="ev-form">
       <div class="row">
-        <div><label for="bName">Name</label><input id="bName" required maxlength="80" value="${esc(d.name)}" placeholder="Vor- und Nachname"></div>
-        <div><label for="bGroup">Gruppe (optional)</label><input id="bGroup" list="bGroups" maxlength="60" value="${esc(d.group || '')}" placeholder="z. B. Rosenheim">
-          <datalist id="bGroups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist></div>
+        <div><label for="bFirst">Vorname</label><input id="bFirst" required maxlength="40" value="${esc(nm.first)}" autocomplete="off"></div>
+        <div><label for="bLast">Nachname</label><input id="bLast" required maxlength="40" value="${esc(nm.last)}" autocomplete="off"></div>
       </div>
       <div class="row">
+        <div><label for="bGroup">Gruppe (optional)</label><input id="bGroup" list="bGroups" maxlength="60" value="${esc(d.group || '')}" placeholder="z. B. Rosenheim">
+          <datalist id="bGroups">${groups.map(g => `<option value="${esc(g)}">`).join('')}</datalist></div>
         <div class="shrink" style="width:110px"><label for="bAge">Alter</label><input id="bAge" type="number" min="0" max="120" inputmode="numeric" value="${esc(d.age ?? '')}"></div>
-        <div><label for="bFunc">Funktion</label><input id="bFunc" list="bFuncs" maxlength="40" value="${esc(d.func || '')}">
-          <datalist id="bFuncs">${funcs.map(f => `<option value="${esc(f)}">`).join('')}</datalist></div>
+      </div>
+      <div class="row">
+        <div><label for="bFunc">Funktion</label>
+          <select id="bFunc"><option value="">— keine —</option>
+            ${funcs.map(f => `<option value="${esc(f)}" ${f === d.func ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></div>
       </div>
       <div class="row" style="align-items:center">
         <div><label class="check" style="margin-top:22px"><input type="checkbox" id="bShirt" ${d.tshirt ? 'checked' : ''}> T-Shirt gewünscht</label></div>
@@ -217,18 +232,20 @@ async function openBayParticipant(p) {
   const toggleSize = () => { $('bSizeBox').style.visibility = $('bShirt').checked ? 'visible' : 'hidden'; };
   $('bShirt').addEventListener('change', toggleSize);
   toggleSize();
-  if (isNew) $('bName').focus();
+  if (isNew) $('bFirst').focus();
 
   $('bayForm').addEventListener('submit', async ev => {
     ev.preventDefault();
     const err = msg => { const e = modal.querySelector('.form-error'); e.textContent = msg; e.hidden = !msg; };
-    const name = $('bName').value.trim();
-    if (!name) return err('Bitte einen Namen eingeben.');
+    const firstName = $('bFirst').value.trim(), lastName = $('bLast').value.trim();
+    if (!firstName) return err('Bitte den Vornamen eingeben.');
+    if (!lastName) return err('Bitte den Nachnamen eingeben.');
+    const name = fullName(firstName, lastName);
     const dup = ctx.participants.find(x => norm(x.name) === norm(name) && x.id !== p?.id);
     if (dup && !confirm(`Es gibt schon „${dup.name}“. Trotzdem speichern?`)) return;
     const ageVal = $('bAge').value.trim();
     const rec = await DB.save('bayParticipant', {
-      ...(p || {}), name, group: $('bGroup').value.trim(), age: ageVal === '' ? '' : Math.max(0, parseInt(ageVal, 10) || 0),
+      ...(p || {}), name, firstName, lastName, group: $('bGroup').value.trim(), age: ageVal === '' ? '' : Math.max(0, parseInt(ageVal, 10) || 0),
       func: $('bFunc').value.trim(), tshirt: $('bShirt').checked, size: $('bShirt').checked ? $('bSize').value : '',
       note: $('bNote').value.trim(),
     });
@@ -391,21 +408,29 @@ async function importBayRows(rows, existing) {
   else if (iName < 0 && iVor < 0 && iNach < 0) iName = 0;
   const yes = v => /^(ja|j|x|yes|y|1|true|wahr)$/i.test(String(v || '').trim());
   const known = new Set(existing.map(p => norm(p.name)));
-  let added = 0, skipped = 0;
+  let added = 0, skipped = 0, noLast = 0;
   for (const r of hasHeader ? rows.slice(1) : rows) {
-    const name = iName >= 0 ? r[iName] : [r[iVor], r[iNach]].filter(Boolean).join(' ');
-    if (!name) continue;
+    // Vor- und Nachname getrennt; steht nur „Name“ in der Liste, wird am letzten Leerzeichen geteilt
+    let first = '', last = '';
+    if (iVor >= 0 || iNach >= 0) {
+      first = iVor >= 0 ? (r[iVor] || '') : '';
+      last = iNach >= 0 ? (r[iNach] || '') : '';
+      if (!last && first) ({ first, last } = splitName({ name: first }));
+    } else ({ first, last } = splitName({ name: r[iName] || '' }));
+    if (!first && !last) continue;
+    if (!first || !last) { noLast++; continue; }
+    const name = fullName(first, last);
     if (known.has(norm(name))) { skipped++; continue; }
     let size = iSize >= 0 ? (r[iSize] || '').toUpperCase().replace(/\s/g, '') : '';
     if (size && !BAY_SIZES.includes(size)) size = BAY_SIZES.find(s => s === size.replace(/^GR\.?/, '')) || size;
     const tshirt = iShirt >= 0 ? yes(r[iShirt]) || (!!size && !/^(nein|n|no|0)$/i.test(r[iShirt] || '')) : !!size;
     const age = iAge >= 0 && r[iAge] !== '' ? parseInt(r[iAge], 10) : '';
-    await DB.save('bayParticipant', { name, group: iGroup >= 0 ? r[iGroup] || '' : '', age: Number.isNaN(age) ? '' : age,
+    await DB.save('bayParticipant', { name, firstName: first, lastName: last, group: iGroup >= 0 ? r[iGroup] || '' : '', age: Number.isNaN(age) ? '' : age,
       func: iFunc >= 0 ? r[iFunc] || '' : 'Teilnehmer', tshirt, size: tshirt ? size : '', note: '' });
     known.add(norm(name));
     added++;
   }
-  return { added, skipped };
+  return { added, skipped, noLast };
 }
 
 // Teilnehmer als Personen in ein Getränke-Event übernehmen (und verknüpfen)
@@ -442,8 +467,8 @@ function openBayToDrinks(ctx) {
 }
 
 function bayExport(ctx, accounts) {
-  downloadCsv('bayairn_teilnehmer.csv', ['Name', 'Gruppe', 'Alter', 'Funktion', 'T-Shirt', 'Größe', 'Saldo € (offen +)', 'Notiz'],
-    ctx.participants.map(p => [p.name, p.group || '', p.age === '' || p.age == null ? '' : Number(p.age), p.func || '',
+  downloadCsv('bayairn_teilnehmer.csv', ['Vorname', 'Nachname', 'Gruppe', 'Alter', 'Funktion', 'T-Shirt', 'Größe', 'Saldo € (offen +)', 'Notiz'],
+    ctx.participants.map(p => [splitName(p).first, splitName(p).last, p.group || '', p.age === '' || p.age == null ? '' : Number(p.age), p.func || '',
       p.tshirt ? 'ja' : 'nein', p.size || '', accounts.get(p.id).saldo, p.note || '']));
 }
 
