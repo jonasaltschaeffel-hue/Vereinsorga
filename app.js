@@ -115,9 +115,35 @@ async function renderHome() {
 
 // payment {personId, name, group, qty, sum, lines[], items[], entryIds[]}:
 // eine bezahlte Rechnung. Die enthaltenen Ausgaben (entryIds) gelten als bezahlt.
+// ---------- Events der Getränkevergabe ----------
+// drinkEvent {name, start, end, archived}. Personen, Getränke, Ausgaben und Zahlungen
+// tragen eventId. Daten von vor der Event-Einführung (ohne eventId) gehören zum
+// Pseudo-Event „Bisherige Daten“.
+const LEGACY_EVENT = '__legacy__';
+const currentEventId = () => localStorage.getItem('drinkEvent') || '';
+const evOf = r => r.eventId || LEGACY_EVENT;
+const eventIdForSave = () => currentEventId() === LEGACY_EVENT ? '' : currentEventId();
+const eventDates = e => e.start ? ` · ${new Date(e.start + 'T12:00').toLocaleDateString('de-DE')}${e.end && e.end !== e.start ? ' – ' + new Date(e.end + 'T12:00').toLocaleDateString('de-DE') : ''}` : '';
+
+async function currentEvent() {
+  const id = currentEventId();
+  if (!id) return null;
+  if (id === LEGACY_EVENT) return { id, name: 'Bisherige Daten', legacy: true };
+  return (await DB.all('drinkEvent')).find(e => e.id === id) || null;
+}
+
+// Ohne gewähltes Event zur Event-Auswahl schicken
+async function requireEvent() {
+  const ev = await currentEvent();
+  if (!ev) { location.replace('#/getraenke'); return null; }
+  return ev;
+}
+
 async function loadDrinkData() {
-  const [persons, drinks, entries, payments] = await Promise.all(
-    [DB.all('person'), DB.all('drink'), DB.all('drinkEntry'), DB.all('payment')]);
+  const cur = currentEventId();
+  const mine = list => list.filter(r => evOf(r) === cur);
+  const [persons, drinks, entries, payments] = (await Promise.all(
+    [DB.all('person'), DB.all('drink'), DB.all('drinkEntry'), DB.all('payment')])).map(mine);
   persons.sort(byName);
   drinks.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || byName(a, b));
   const paidIds = new Set(payments.flatMap(p => p.entryIds || []));
@@ -127,10 +153,14 @@ async function loadDrinkData() {
 const dateTime = iso => new Date(iso).toLocaleString('de-DE',
   { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
-function drinkTabs(active) {
+function drinkTabs(active, ev) {
   const tabs = [['einrichtung', '1 · Einrichtung', 'einrichtung'], ['abrechnung', 'Abrechnung', 'abrechnung'],
     ['bezahlt', 'Bezahlt', 'abrechnung'], ['statistik', 'Statistik', 'statistik']].filter(t => Auth.can(t[2]));
-  return `<nav class="tabs">
+  return `${ev ? `<div class="event-bar">
+      <span class="grow">🎪 <strong>${esc(ev.name)}</strong><span class="muted">${eventDates(ev)}</span></span>
+      <a class="btn small" href="#/getraenke">Event wechseln</a>
+    </div>` : ''}
+    <nav class="tabs">
     ${tabs.map(([k, l]) => `<a href="#/getraenke/${k}" class="${k === active ? 'active' : ''}">${l}</a>`).join('')}
   </nav>`;
 }
@@ -197,6 +227,7 @@ async function upsertItems(kind, objs, existing) {
     const cur = map.get(k.key(o));
     if (!cur) {
       const data = kind === 'drink' ? { name: o.name, price: o.price || 0, order: ++order } : { name: o.name, group: o.group || '' };
+      data.eventId = eventIdForSave();
       map.set(k.key(o), await DB.save(kind, data));
       added++;
     } else if (kind === 'drink' && o.price !== cur.price) {
@@ -348,10 +379,12 @@ function bindSetupCard(kind, items, entries) {
 
 async function renderEinrichtung() {
   setTitle('Getränkevergabe', '#/');
+  const drinkEv = await requireEvent();
+  if (!drinkEv) return;
   const { persons, drinks, entries } = await loadDrinkData();
   const ready = persons.length && drinks.length;
   view.innerHTML = `
-    ${drinkTabs('einrichtung')}
+    ${drinkTabs('einrichtung', drinkEv)}
     ${ready ? `
       <div class="card start-card">
         <div class="grow"><strong>${persons.length} Personen · ${drinks.length} Getränke</strong>
@@ -458,6 +491,8 @@ let billQuery = '';
 async function renderAbrechnung(fresh) {
   if (fresh) { paidThisVisit = []; billQuery = ''; }
   setTitle('Getränkevergabe', '#/');
+  const drinkEv = await requireEvent();
+  if (!drinkEv) return;
   const { persons, entries, payments, paidIds } = await loadDrinkData();
   const bills = summarizeByPerson(entries.filter(e => !paidIds.has(e.id)), persons);
   const justPaid = paidThisVisit.map(id => payments.find(p => p.id === id)).filter(Boolean);
@@ -467,7 +502,7 @@ async function renderAbrechnung(fresh) {
   const total = bills.reduce((s, b) => s + b.sum, 0);
 
   view.innerHTML = `
-    ${drinkTabs('abrechnung')}
+    ${drinkTabs('abrechnung', drinkEv)}
     <div class="card">
       <p style="margin:0 0 12px"><strong>${bills.length}</strong> ${bills.length === 1 ? 'Person hat' : 'Personen haben'} offene Beträge ·
         zusammen <strong>${euro(total)}</strong>${justPaid.length ? ` · <span class="muted">${justPaid.length} gerade bezahlt</span>` : ''}</p>
@@ -502,6 +537,7 @@ async function renderAbrechnung(fresh) {
     btn.disabled = true;
     const b = bills.find(x => x.id === btn.dataset.pay);
     const rec = await DB.save('payment', {
+      eventId: eventIdForSave(),
       personId: b.id, name: b.name, group: b.group || '', qty: b.qty,
       sum: Math.round(b.sum * 100) / 100, lines: b.lines,
       items: b.items.map(({ id, ...rest }) => rest), entryIds: b.items.map(i => i.id),
@@ -537,12 +573,14 @@ let paidQuery = '';
 
 async function renderBezahlt() {
   setTitle('Getränkevergabe', '#/');
+  const drinkEv = await requireEvent();
+  if (!drinkEv) return;
   const { payments } = await loadDrinkData();
   payments.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const total = payments.reduce((s, p) => s + p.sum, 0);
 
   view.innerHTML = `
-    ${drinkTabs('bezahlt')}
+    ${drinkTabs('bezahlt', drinkEv)}
     <div class="card">
       <p style="margin:0 0 12px"><strong>${payments.length}</strong> bezahlte Rechnungen · zusammen <strong>${euro(total)}</strong></p>
       <div class="row">
@@ -667,6 +705,8 @@ function bindChart(container, data) {
 
 async function renderStatistik() {
   setTitle('Getränkevergabe', '#/');
+  const drinkEv = await requireEvent();
+  if (!drinkEv) return;
   const { persons, entries, payments } = await loadDrinkData();
   const totalQty = entries.reduce((s, e) => s + e.qty, 0);
   const totalSum = entries.reduce((s, e) => s + e.qty * (e.price || 0), 0);
@@ -706,7 +746,7 @@ async function renderStatistik() {
     </table></div>`;
 
   view.innerHTML = `
-    ${drinkTabs('statistik')}
+    ${drinkTabs('statistik', drinkEv)}
     <div class="kpis">
       <div class="kpi"><span>Getränke ausgegeben</span><strong>${totalQty}</strong></div>
       <div class="kpi"><span>Umsatz gesamt</span><strong>${euro(totalSum)}</strong></div>
@@ -775,6 +815,8 @@ async function keepAwake(on) {
 
 async function renderAusgabe() {
   setTitle('Getränkeausgabe');
+  const drinkEv = await requireEvent();
+  if (!drinkEv) return;
   let { persons, drinks, entries, paidIds } = await loadDrinkData();
   kiosk.person = null;
   kiosk.cart.clear();
@@ -783,8 +825,9 @@ async function renderAusgabe() {
 
   if (!persons.length || !drinks.length) {
     view.innerHTML = `<div class="card"><h2>Noch nicht bereit</h2>
-      <p>Bitte zuerst Personen und Getränke anlegen.</p>
-      <a class="btn primary" href="#/getraenke/einrichtung">Zur Einrichtung</a></div>`;
+      <p>Für das Event „${esc(drinkEv.name)}“ sind noch keine Personen oder Getränke angelegt.</p>
+      ${Auth.can('einrichtung') ? '<a class="btn primary" href="#/getraenke/einrichtung">Zur Einrichtung</a>' : ''}
+      <a class="btn" href="#/getraenke">Anderes Event wählen</a></div>`;
     return;
   }
   const groups = [...new Set(persons.map(p => p.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
@@ -792,7 +835,7 @@ async function renderAusgabe() {
   view.innerHTML = `
     <div class="kiosk" id="kiosk">
       <div class="kiosk-head">
-        <h1>🥤 Getränkeausgabe</h1>
+        <h1>🥤 Getränkeausgabe <span class="muted kiosk-event">· ${esc(drinkEv.name)}</span></h1>
         <span id="kClock" class="muted"></span>
         <button class="btn" id="kExit">Ausgabe beenden</button>
       </div>
@@ -963,6 +1006,7 @@ async function renderAusgabe() {
       for (const [id, qty] of items) {
         const d = drinks.find(x => x.id === id);
         await DB.save('drinkEntry', {
+          eventId: eventIdForSave(),
           bookingId, personId: p.id, personName: p.name, personGroup: p.group || '',
           drinkId: d.id, drinkName: d.name, price: d.price || 0, qty,
         });
@@ -1649,10 +1693,114 @@ const ROUTES = {
   'admin': { render: renderAdmin, perms: ['admin'] },
 };
 
-// Getränkevergabe öffnet die erste Seite, für die der Benutzer Rechte hat.
-function renderGetraenkeStart() {
+// Getränkevergabe: zuerst das Event wählen, dann die erste Seite, für die der Benutzer Rechte hat.
+function openDrinkEvent(id) {
+  localStorage.setItem('drinkEvent', id);
   const first = ['einrichtung', 'abrechnung', 'statistik'].find(p => Auth.can(p));
-  location.replace(first ? `#/getraenke/${first}` : '#/ausgabe');
+  location.hash = first ? `#/getraenke/${first}` : '#/ausgabe';
+}
+
+async function renderGetraenkeStart() {
+  setTitle('Getränkevergabe', '#/');
+  const canManage = Auth.can('einrichtung');
+  const [events, persons, drinks, entries] = await Promise.all(
+    [DB.all('drinkEvent'), DB.all('person'), DB.all('drink'), DB.all('drinkEntry')]);
+  const hasLegacy = [...persons, ...drinks, ...entries].some(r => !r.eventId);
+  const stats = id => {
+    const p = persons.filter(x => evOf(x) === id).length;
+    const g = entries.filter(x => evOf(x) === id).reduce((s, e) => s + e.qty, 0);
+    return `${p} ${p === 1 ? 'Person' : 'Personen'} · ${g} ${g === 1 ? 'Getränk' : 'Getränke'} ausgegeben`;
+  };
+  const sortEv = (a, b) => (b.start || '').localeCompare(a.start || '') || a.name.localeCompare(b.name, 'de');
+  const active = events.filter(e => !e.archived).sort(sortEv);
+  const archived = events.filter(e => e.archived).sort(sortEv);
+  const current = currentEventId();
+  const tile = e => `
+    <div class="event-tile ${e.id === current ? 'current' : ''} ${e.archived ? 'archived' : ''}" role="button" tabindex="0" data-id="${e.id}">
+      <span class="event-icon">${e.legacy ? '🗂️' : '🎪'}</span>
+      <span class="grow"><strong>${esc(e.name)}</strong>
+        <span class="muted">${e.legacy ? 'Daten von vor der Einführung der Events' : eventDates(e).replace(/^ · /, '') || 'ohne Datum'}</span>
+        <span class="muted">${stats(e.id)}</span></span>
+      ${canManage && !e.legacy ? `<button class="btn small" data-edit="${e.id}" aria-label="Event bearbeiten">✎</button>` : ''}
+      <span class="muted">›</span>
+    </div>`;
+  const legacy = hasLegacy ? [{ id: LEGACY_EVENT, name: 'Bisherige Daten', legacy: true }] : [];
+
+  view.innerHTML = `
+    <div class="card">
+      <div class="card-head">
+        <h2>Für welches Event?</h2>
+        ${canManage ? '<button class="btn primary small" id="newEvent">＋ Neues Event</button>' : ''}
+      </div>
+      <p class="muted" style="margin:0">Personen, Getränke, Ausgaben, Abrechnung und Statistik gelten jeweils für ein Event.</p>
+    </div>
+    ${active.length || legacy.length ? `<div class="event-list">${[...active, ...legacy].map(tile).join('')}</div>` : `
+      <div class="card"><p style="margin:0">${canManage ? 'Noch kein Event angelegt. Leg mit „＋ Neues Event“ das erste an.'
+        : 'Noch kein Event angelegt. Bitte wende dich an jemanden, der Personen &amp; Getränke verwalten darf.'}</p></div>`}
+    ${archived.length ? `
+      <details class="card archive">
+        <summary>Archiv (${archived.length})</summary>
+        <div class="event-list">${archived.map(tile).join('')}</div>
+      </details>` : ''}
+  `;
+
+  view.querySelectorAll('.event-tile').forEach(t => {
+    const open = ev => { if (ev.target.closest('[data-edit]')) return; openDrinkEvent(t.dataset.id); };
+    t.addEventListener('click', open);
+    t.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(ev); } });
+  });
+  view.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () =>
+    openEventEditor(events.find(e => e.id === b.dataset.edit), { persons, drinks, entries })));
+  document.getElementById('newEvent')?.addEventListener('click', () => openEventEditor(null));
+}
+
+// Event anlegen oder bearbeiten (Name, Zeitraum, Archiv, Löschen nur ohne Daten)
+function openEventEditor(e, data) {
+  const isNew = !e;
+  const used = !isNew && data && [...data.persons, ...data.drinks, ...data.entries].some(r => r.eventId === e.id);
+  const modal = openModal(`
+    <div class="modal-head"><div class="grow"><h2>${isNew ? 'Neues Event' : 'Event bearbeiten'}</h2></div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
+    <form id="eventForm" class="ev-form">
+      <label for="eName">Name</label>
+      <input id="eName" maxlength="60" required value="${esc(e?.name || '')}" placeholder="z. B. Jugendlager 2026">
+      <div class="row">
+        <div><label for="eStart">Von (optional)</label><input id="eStart" type="date" value="${e?.start || ''}"></div>
+        <div><label for="eEnd">Bis (optional)</label><input id="eEnd" type="date" value="${e?.end || ''}"></div>
+      </div>
+      ${isNew ? '' : `<label class="check"><input type="checkbox" id="eArchived" ${e.archived ? 'checked' : ''}> Archiviert (erscheint unten im Archiv)</label>`}
+      <p class="form-error" hidden></p>
+      <div class="modal-actions">
+        ${!isNew ? `<button class="btn danger" type="button" id="eDelete" ${used ? 'disabled title="Nur leere Events können gelöscht werden – stattdessen archivieren"' : ''}>Löschen</button>` : ''}
+        <span class="grow"></span>
+        <button class="btn" type="button" data-close>Abbrechen</button>
+        <button class="btn primary" type="submit">${isNew ? 'Anlegen' : 'Speichern'}</button>
+      </div>
+      ${used ? '<p class="muted" style="font-size:14px;margin:10px 0 0">Dieses Event enthält schon Daten und kann nur archiviert, nicht gelöscht werden.</p>' : ''}
+    </form>`);
+  modal.querySelector('#eName').focus();
+  modal.querySelector('#eventForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const err = msg => { const p = modal.querySelector('.form-error'); p.textContent = msg; p.hidden = !msg; };
+    const name = modal.querySelector('#eName').value.trim();
+    const start = modal.querySelector('#eStart').value;
+    const end = modal.querySelector('#eEnd').value || start;
+    if (!name) return err('Bitte einen Namen eingeben.');
+    if (start && end < start) return err('„Bis“ liegt vor „Von“.');
+    const rec = await DB.save('drinkEvent', { ...(e || {}), name, start, end: start ? end : '',
+      archived: isNew ? false : modal.querySelector('#eArchived').checked });
+    closeModal();
+    toast(isNew ? `Event „${name}“ angelegt` : 'Event gespeichert');
+    if (isNew) openDrinkEvent(rec.id); else renderGetraenkeStart();
+  });
+  modal.querySelector('#eDelete')?.addEventListener('click', async () => {
+    if (!confirm(`Event „${e.name}“ löschen?`)) return;
+    await DB.remove(e);
+    if (currentEventId() === e.id) localStorage.removeItem('drinkEvent');
+    closeModal();
+    toast('Event gelöscht');
+    renderGetraenkeStart();
+  });
 }
 
 let routeRun = 0;

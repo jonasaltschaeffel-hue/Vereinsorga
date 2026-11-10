@@ -154,6 +154,28 @@ textarea {
   margin-bottom: 8px; resize: vertical;
 }
 
+/* ---------- Events der Getränkevergabe ---------- */
+.event-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 10px 14px;
+  background: color-mix(in srgb, var(--primary) 10%, var(--card)); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.event-bar .grow { flex: 1; min-width: 180px; }
+.event-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.event-tile {
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.event-tile:hover, .event-tile:focus-visible { border-color: var(--primary); outline: none; }
+.event-tile.current { border: 2px solid var(--primary); }
+.event-tile.archived { opacity: .7; }
+.event-tile .grow { flex: 1; min-width: 0; }
+.event-tile .grow strong { display: block; font-size: 17px; overflow-wrap: anywhere; }
+.event-tile .grow .muted { display: block; font-size: 14px; }
+.event-icon { font-size: 28px; }
+details.archive summary { cursor: pointer; font-weight: 600; }
+details.archive .event-list { margin: 12px 0 0; }
+.kiosk-event { font-size: 17px; font-weight: 400; }
+
 /* ---------- Abrechnung & Statistik ---------- */
 .bill-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .bill-head .grow { flex: 1; font-size: 18px; }

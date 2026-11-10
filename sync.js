@@ -3,7 +3,7 @@
 // 2. Herunterladen: alles, was seit dem letzten Abgleich auf dem Server geändert wurde
 // Läuft nach jeder Änderung (kurz verzögert), alle 30 Sekunden, beim Wiederverbinden und beim Öffnen.
 const Sync = (() => {
-  const COLL = { person: 'persons', drink: 'drinks', drinkEntry: 'entries', payment: 'payments',
+  const COLL = { drinkEvent: 'drinkevents', person: 'persons', drink: 'drinks', drinkEntry: 'entries', payment: 'payments',
     event: 'events', calCategory: 'calcategories' };
   const BATCH = 200;      // Schreibvorgänge pro Hochladen
   const PAGE = 300;       // Dokumente pro Abruf (muss größer als BATCH sein)
