@@ -384,6 +384,26 @@ table.account tfoot td { border-top: 2px solid var(--line); border-bottom: 0; }
 .ing-row .ing-item { flex: 1; }
 input[type=color] { width: 44px; height: 42px; padding: 2px; }
 
+/* Dezenter Link zur Einkaufsliste */
+.ct-footer-link { text-align: center; margin: 22px 0 6px; font-size: 14px; }
+.ct-footer-link a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--muted); }
+.ct-footer-link a:hover { color: var(--primary); border-color: var(--primary); }
+
+/* Einkaufsrechner */
+.shop-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.shop-settings summary { cursor: pointer; font-weight: 600; }
+.shop-table input { padding: 6px 8px; font-size: 15px; min-width: 90px; }
+.shop-table input.numin { width: 76px; min-width: 0; text-align: right; }
+.shop-table input[type=checkbox] { width: 20px; height: 20px; min-width: 0; }
+.shop-table td { padding: 4px; }
+.shop-print { font-family: Arial, sans-serif; color: #000; }
+.shop-print h1 { font-size: 24px; margin: 0 0 4px; }
+.shop-print table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 15px; }
+.shop-print th, .shop-print td { border-bottom: 1px solid #999; padding: 8px 6px; text-align: left; }
+.shop-print td.box { font-size: 20px; width: 30px; }
+.shop-print .num { text-align: right; }
+.shop-print .small { font-size: 11px; color: #555; margin-top: 16px; }
+
 /* Getränkekarte: Vorschau und Druck */
 .menu-layout { display: grid; grid-template-columns: 280px 1fr; gap: 24px; align-items: start; }
 @media (max-width: 800px) { .menu-layout { grid-template-columns: 1fr; } }

@@ -95,7 +95,8 @@ async function renderCocktails() {
           `<button class="chip ${ctState.filter === k ? 'active' : ''}" data-f="${k}">${l}</button>`).join('')}
       </div>
     </div>
-    <div class="ct-grid" id="ctGrid"></div>`;
+    <div class="ct-grid" id="ctGrid"></div>
+    ${canEditCt() || Auth.can('einrichtung') ? '<p class="ct-footer-link"><a href="#/einkauf">🛒 Einkaufsliste für die Party berechnen</a></p>' : ''}`;
 
   const draw = () => {
     const q = norm(ctState.query);

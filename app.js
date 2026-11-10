@@ -1703,6 +1703,7 @@ const ROUTES = {
   'kalender': { render: renderKalender, perms: ['kalender', 'kalender_bearbeiten'] },
   'bayairn': { render: renderBayAirn, perms: ['bayairn'] },
   'cocktails': { render: renderCocktails, perms: ['cocktails', 'cocktails_bearbeiten'] },
+  'einkauf': { render: renderEinkauf, perms: ['cocktails_bearbeiten', 'einrichtung'] },
   'einstellungen': { render: renderEinstellungen, perms: ['einstellungen'] },
   'admin': { render: renderAdmin, perms: ['admin'] },
 };
