@@ -9,6 +9,7 @@ const backBtn = document.getElementById('backBtn');
 const DRINK_PERMS = ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'];
 const MODULES = [
   { href: '#/getraenke', emoji: '🥤', name: 'Getränkevergabe', desc: 'Personen, Getränke, Ausgabe, Abrechnung', perms: DRINK_PERMS },
+  { href: '#/bayairn', emoji: '✈️', name: 'BayAirn', desc: 'Teilnehmer, Anmeldung & Konten', perms: ['bayairn'] },
   { href: '#/kalender', emoji: '📅', name: 'Kalender', desc: 'Termine & Veranstaltungen', perms: ['kalender', 'kalender_bearbeiten'] },
   { href: '#/admin', emoji: '🔑', name: 'Admin', desc: 'Benutzer & Rechte', perms: ['admin'] },
   { href: '#/einstellungen', emoji: '⚙️', name: 'Einstellungen', desc: 'Gerät, Sicherung, Import', perms: ['einstellungen'] },
@@ -173,7 +174,7 @@ const KIND = {
     fields: [['name', 'Name', 'z. B. Max Mustermann'], ['group', 'Gruppe (optional)', 'z. B. Rosenheim']],
     hint: 'Excel-Spalten: <b>Name</b> (oder <b>Vorname</b> + <b>Nachname</b>), optional <b>Gruppe</b>.',
     key: p => norm(p.name) + '|' + norm(p.group),
-    line: p => `<span class="grow">${esc(p.name)}${p.group ? ` <span class="muted">· ${esc(p.group)}</span>` : ''}</span>`,
+    line: p => `<span class="grow">${esc(p.name)}${p.group ? ` <span class="muted">· ${esc(p.group)}</span>` : ''}${p.participantId ? ' <span class="tag" title="mit BayAirn-Konto verknüpft">✈️ BayAirn</span>' : ''}</span>`,
   },
   drink: {
     title: 'Getränke', none: 'Noch keine Getränke.',
@@ -495,6 +496,8 @@ async function renderAbrechnung(fresh) {
   if (!drinkEv) return;
   const { persons, entries, payments, paidIds } = await loadDrinkData();
   const bills = summarizeByPerson(entries.filter(e => !paidIds.has(e.id)), persons);
+  // Mit BayAirn verknüpfte Personen zahlen über ihr Teilnehmerkonto
+  const bayLinked = new Set(persons.filter(p => p.participantId).map(p => p.id));
   const justPaid = paidThisVisit.map(id => payments.find(p => p.id === id)).filter(Boolean);
   const openIds = new Set(bills.map(b => b.id));
   const justPaidIds = new Set(justPaid.map(p => p.personId));
@@ -514,7 +517,9 @@ async function renderAbrechnung(fresh) {
       </div>
     </div>
     <div id="bills">
-      ${bills.map(b => billCard(b, { actions: `<button class="btn pay-btn" data-pay="${esc(b.id)}">✓ Bezahlt</button>` })).join('')}
+      ${bills.map(b => billCard(b, { actions: bayLinked.has(b.id)
+        ? '<span class="tag" title="Wird zusammen mit den übrigen Kosten im BayAirn-Konto bezahlt">✈️ über BayAirn-Konto</span>'
+        : `<button class="btn pay-btn" data-pay="${esc(b.id)}">✓ Bezahlt</button>` })).join('')}
       ${justPaid.map(p => billCard(p, {
         cls: 'paid',
         sub: `✓ bezahlt um ${time(p.createdAt)}`,
@@ -1689,6 +1694,7 @@ const ROUTES = {
   'getraenke/statistik': { render: renderStatistik, perms: ['statistik'] },
   'ausgabe': { render: renderAusgabe, perms: ['ausgabe'] },
   'kalender': { render: renderKalender, perms: ['kalender', 'kalender_bearbeiten'] },
+  'bayairn': { render: renderBayAirn, perms: ['bayairn'] },
   'einstellungen': { render: renderEinstellungen, perms: ['einstellungen'] },
   'admin': { render: renderAdmin, perms: ['admin'] },
 };

@@ -325,6 +325,22 @@ fieldset.scope legend { font-size: 14px; color: var(--muted); padding: 0 4px; }
 .cat-list input[type=color], #catNew input[type=color] { width: 44px; height: 40px; padding: 2px; flex: none; }
 .cat-list input.grow { flex: 1; }
 
+/* ---------- BayAirn ---------- */
+.bay-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.bay-summary .card { margin-bottom: 14px; }
+.bay-item { cursor: pointer; }
+.bay-item .grow strong { display: block; overflow-wrap: anywhere; }
+.bay-item .grow .muted { display: block; font-size: 14px; }
+.saldo { font-size: 14px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.saldo.open { color: var(--danger); }
+.saldo.credit { color: var(--ok); }
+.saldo.zero { color: var(--muted); }
+table.account tr.editable { cursor: pointer; }
+table.account tr.editable:hover td { background: color-mix(in srgb, var(--primary) 7%, transparent); }
+table.account td.pos { color: var(--ok); }
+table.account tfoot td { border-top: 2px solid var(--line); border-bottom: 0; }
+#baySearch { margin-bottom: 4px; }
+
 /* ---------- Admin ---------- */
 .admin-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
 @media (max-width: 600px) { .admin-stats { grid-template-columns: repeat(2, 1fr); } }

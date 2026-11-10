@@ -4,7 +4,7 @@
 // Läuft nach jeder Änderung (kurz verzögert), alle 30 Sekunden, beim Wiederverbinden und beim Öffnen.
 const Sync = (() => {
   const COLL = { drinkEvent: 'drinkevents', person: 'persons', drink: 'drinks', drinkEntry: 'entries', payment: 'payments',
-    event: 'events', calCategory: 'calcategories' };
+    event: 'events', calCategory: 'calcategories', bayParticipant: 'bayparticipants', bayBooking: 'baybookings' };
   const BATCH = 200;      // Schreibvorgänge pro Hochladen
   const PAGE = 300;       // Dokumente pro Abruf (muss größer als BATCH sein)
   const state = { status: 'idle', pending: 0, error: '', last: null };
@@ -13,10 +13,12 @@ const Sync = (() => {
 
   const emit = () => listeners.forEach(fn => fn({ ...state }));
   // Nur abrufen, was der Benutzer laut Zugriffsregeln lesen darf (sonst lehnt der Server ab)
+  // (BayAirn liest Getränke mit, weil sie auf den Teilnehmerkonten erscheinen)
   const canRead = coll =>
-    coll === 'payments' ? Auth.can('abrechnung') || Auth.can('statistik')
+    coll === 'payments' ? ['abrechnung', 'statistik', 'bayairn'].some(p => Auth.can(p))
     : coll === 'events' || coll === 'calcategories' ? Auth.can('kalender') || Auth.can('kalender_bearbeiten')
-    : ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'].some(p => Auth.can(p));
+    : coll === 'bayparticipants' || coll === 'baybookings' ? Auth.can('bayairn')
+    : ['ausgabe', 'einrichtung', 'abrechnung', 'statistik', 'bayairn'].some(p => Auth.can(p));
 
   function schedule(ms = 1500) {
     clearTimeout(timer);

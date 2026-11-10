@@ -13,6 +13,7 @@ const Auth = (() => {
     ['einrichtung', 'Personen & Getränke verwalten'],
     ['abrechnung', 'Abrechnung & Zahlungen'],
     ['statistik', 'Statistik ansehen'],
+    ['bayairn', 'BayAirn: Teilnehmer & Konten'],
     ['kalender', 'Kalender ansehen'],
     ['kalender_bearbeiten', 'Kalender bearbeiten'],
     ['einstellungen', 'Einstellungen & Sicherung'],
