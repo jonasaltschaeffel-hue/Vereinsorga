@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Morane Rallye 180TD – LSV Regensburg</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/stil.css">
+</head>
+<body class="artikel">
+
+<canvas id="sky" aria-hidden="true"></canvas>
+
+<header id="topbar">
+  <a class="brand" href="../index.html" aria-label="LSV Regensburg – zur Startseite">
+    <img src="../img/wappen-lsv-regensburg.jpg" alt="Wappen des LSV Regensburg" hidden
+         onload="this.hidden=false;this.nextElementSibling.setAttribute('hidden','')">
+    <svg class="shield" viewBox="0 0 44 52" aria-hidden="true">
+      <path d="M2 3h40v22c0 13-9 21-20 25C11 46 2 38 2 25Z" fill="#fff" stroke="#0f2c4c" stroke-width="2.5"/>
+      <path d="M22 4v45" stroke="#c8102e" stroke-width="2"/>
+      <text x="22" y="30" text-anchor="middle" font-family="Barlow Condensed" font-weight="700" font-size="11" fill="#0f2c4c">LSV</text>
+    </svg>
+    <span class="name">LSV Regensburg<small>Segelflug</small></span>
+  </a>
+  <button id="menu-btn" aria-label="Menü öffnen" aria-expanded="false" aria-controls="tabs">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <!-- Reiter: Reihenfolge und Texte hier und in seiten.ps1 pflegen -->
+  <ul id="tabs">
+    <li><a href="../seiten/mitfliegen.html">Mitfliegen</a></li>
+    <li><a href="../seiten/verein.html">Verein</a></li>
+    <li><a href="../seiten/jugend.html">Jugend</a></li>
+    <li><a href="../seiten/streckenflug.html">Streckenflug</a></li>
+    <li><a href="../seiten/werkstatt.html">Werkstatt</a></li>
+    <li><a href="../seiten/anflug.html">Anflug für Piloten</a></li>
+    <li><a href="../seiten/webcams.html">Webcams</a></li>
+    <li><a href="../seiten/flugvorbereitung.html">Flugvorbereitung</a></li>
+  </ul>
+</header>
+
+<main>
+  <article class="article">
+    <a class="back" href="../index.html#flotte-ehemalig">← Zurück zur Flotte</a>
+    <div data-e="xrallye180td-d" class="date">Motorflugzeug · ehemals Schlepp &amp; Reise</div>
+    <h1 data-e="xrallye180td-t">Morane Rallye 180TD</h1>
+    <div class="pic placeholder"><img data-e="xrallye180td-img" src="../img/flotte/rallye180td.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+
+    <p data-e="xrallye180td-p0">Die Morane Rallye wurde zum Reisen, zum Schleppen und für Rundflüge genutzt.</p>
+    <p data-e="xrallye180td-p1">Sie war gutmütig zu fliegen und kam mit sehr kurzen Start- und Landestrecken aus.</p>
+
+    <h2 data-e="xrallye180td-h">Technische Daten</h2>
+    <table class="ad">
+        <tr><th data-e="xrallye180td-k1">Kennzeichen</th><td data-e="xrallye180td-v1">D-EDLX</td></tr>
+        <tr><th data-e="xrallye180td-k2">Baujahr</th><td data-e="xrallye180td-v2">1977</td></tr>
+        <tr><th data-e="xrallye180td-k3">Besatzung</th><td data-e="xrallye180td-v3">4</td></tr>
+        <tr><th data-e="xrallye180td-k4">Spannweite</th><td data-e="xrallye180td-v4">9,76 m</td></tr>
+        <tr><th data-e="xrallye180td-k5">Motorleistung</th><td data-e="xrallye180td-v5">180 PS</td></tr>
+        <tr><th data-e="xrallye180td-k6">Max. Reisegeschwindigkeit</th><td data-e="xrallye180td-v6">180 km/h</td></tr>
+        <tr><th data-e="xrallye180td-k7">Höchstgeschwindigkeit</th><td data-e="xrallye180td-v7">270 km/h</td></tr>
+        <tr><th data-e="xrallye180td-k8">Verbrauch</th><td data-e="xrallye180td-v8">ca. 35 Liter/Stunde</td></tr>
+        <tr><th data-e="xrallye180td-k9">Leergewicht</th><td data-e="xrallye180td-v9">ca. 700 kg</td></tr>
+        <tr><th data-e="xrallye180td-k10">Max. Abfluggewicht</th><td data-e="xrallye180td-v10">1050 kg</td></tr>
+    </table>
+
+    <p data-e="xrallye180td-n" class="note">Ehemaliges Vereinsflugzeug – Angaben laut bisheriger Vereinswebsite.</p>
+  </article>
+</main>
+
+<script src="../js/himmel.js"></script>
+<script>
+  const b = document.getElementById('menu-btn'), t = document.getElementById('tabs');
+  b.addEventListener('click', () => b.setAttribute('aria-expanded', t.classList.toggle('open')));
+</script>
+<script src="../js/editor-loader.js"></script>
+</body>
+</html>

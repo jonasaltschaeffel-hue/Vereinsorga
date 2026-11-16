@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot werden – LSV Regensburg</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../css/stil.css">
+</head>
+<body class="artikel">
+
+<canvas id="sky" aria-hidden="true"></canvas>
+
+<header id="topbar">
+  <a class="brand" href="../index.html" aria-label="LSV Regensburg – zur Startseite">
+    <img src="../img/wappen-lsv-regensburg.jpg" alt="Wappen des LSV Regensburg" hidden
+         onload="this.hidden=false;this.nextElementSibling.setAttribute('hidden','')">
+    <svg class="shield" viewBox="0 0 44 52" aria-hidden="true">
+      <path d="M2 3h40v22c0 13-9 21-20 25C11 46 2 38 2 25Z" fill="#fff" stroke="#0f2c4c" stroke-width="2.5"/>
+      <path d="M22 4v45" stroke="#c8102e" stroke-width="2"/>
+      <text x="22" y="30" text-anchor="middle" font-family="Barlow Condensed" font-weight="700" font-size="11" fill="#0f2c4c">LSV</text>
+    </svg>
+    <span class="name">LSV Regensburg<small>Segelflug</small></span>
+  </a>
+  <button id="menu-btn" aria-label="Menü öffnen" aria-expanded="false" aria-controls="tabs">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <!-- Reiter: im Bearbeitungsmodus unter „Verwaltung → Seiten & Reiter“ pflegen -->
+  <ul id="tabs">
+    <li><a href="mitfliegen.html">Mitfliegen</a></li>
+    <li><a href="pilot-werden.html" class="current" aria-current="page">Pilot werden</a></li>
+    <li><a href="verein.html">Verein</a></li>
+    <li><a href="jugend.html">Jugend</a></li>
+    <li><a href="streckenflug.html">Streckenflug</a></li>
+    <li><a href="werkstatt.html">Werkstatt</a></li>
+    <li><a href="anflug.html">Anflug für Piloten</a></li>
+    <li><a href="webcams.html">Webcams</a></li>
+    <li><a href="flugvorbereitung.html">Flugvorbereitung</a></li>
+  </ul>
+</header>
+
+<main>
+  <article class="article">
+    <a class="back" href="../index.html#pilot-werden">← Zur Startseite</a>
+    <div data-e="pw1" class="date">Ausbildung · ab 14 Jahren</div>
+    <h1 data-e="pw2">Pilot werden</h1>
+    <p data-e="pw3">Einmal selbst am Steuer sitzen, die Sorgen am Boden lassen und nur mit der Kraft der Thermik fliegen? Beim LSV Regensburg kannst du dir diesen Traum erfüllen. Wir sind eine anerkannte Ausbildungseinrichtung, unsere Fluglehrer bilden ehrenamtlich aus. Deshalb ist Fliegen im Verein günstiger, als viele denken.</p>
+    <p data-e="pw4">Die Ausbildung dauert nicht nur ein paar Wochen. Gefragt sind vor allem Zeit und Engagement. Segelfliegen ist ein Gemeinschaftssport: Wartung, Windenfahren oder Rasenmähen erledigen wir selbst, und jeder hilft mit, damit alle in die Luft kommen.</p>
+
+    <h2 data-e="pw5">So läuft die Ausbildung</h2>
+    <table class="ad">
+      <tr><th data-e="pw6">1. Start</th><td data-e="pw7">Aufnahmeantrag ausfüllen, ein paar Formalitäten erledigen und die Untersuchung beim Fliegerarzt machen – dann geht es los.</td></tr>
+      <tr><th data-e="pw8">2. Schulung auf der ASK 13</th><td data-e="pw9">Du sitzt vorne, der Fluglehrer hinten und kann über das Doppelsteuer eingreifen. Schon nach wenigen Flügen steuerst du selbst. Jetzt werden Start und Landung trainiert.</td></tr>
+      <tr><th data-e="pw10">3. Der erste Alleinflug</th><td data-e="pw11">Nach etwa 50 Starts, wenn die Fluglehrer überzeugt sind, fliegst du zum ersten Mal ganz allein – immer mit Funkkontakt zum Boden.</td></tr>
+      <tr><th data-e="pw12">4. Einsitzer Ka 8</th><td data-e="pw13">Mit und ohne Fluglehrer, bei unterschiedlichem Wetter und auf längeren Flügen sammelst du Erfahrung.</td></tr>
+      <tr><th data-e="pw14">5. ASK 21 und Discus CS</th><td data-e="pw15">Umschulung auf moderne Segelflugzeuge aus Glasfaser – genauso einfach zu fliegen, aber mit mehr Leistung.</td></tr>
+      <tr><th data-e="pw16">6. Theorie im Winter</th><td data-e="pw17">In den Wintermonaten lernst du das nötige Wissen für die theoretische Prüfung beim Luftamt.</td></tr>
+      <tr><th data-e="pw18">7. Prüfung und Lizenz</th><td data-e="pw19">Nach der praktischen Prüfung hältst du deine Segelfluglizenz in der Hand.</td></tr>
+    </table>
+
+    <h2 data-e="pw20">Voraussetzungen und Kosten</h2>
+    <table class="ad">
+      <tr><th data-e="pw21">Mindestalter</th><td data-e="pw22">14 Jahre (Luftfahrerschein zum 16. Geburtstag), Motorsegler ab 17 Jahren</td></tr>
+      <tr><th data-e="pw23">Voraussetzungen</th><td data-e="pw24">Polizeiliches Führungszeugnis, Flugtauglichkeitsuntersuchung beim Fliegerarzt, Lehrgangsnachweise</td></tr>
+      <tr><th data-e="pw25">Kosten bis zum Schein</th><td data-e="pw26">ca. 2.000 € (Erfahrungswert), Sondertarife für Jugendliche und Studenten</td></tr>
+      <tr><th data-e="pw27">Schnupperflug</th><td data-e="pw28">Auf Anfrage möglich – am besten einfach an einem Flugtag vorbeikommen.</td></tr>
+      <tr><th data-e="pw29">Kontakt</th><td data-e="pw30"><a href="mailto:ausbildung@luftsportverein-regensburg.de">ausbildung@luftsportverein-regensburg.de</a></td></tr>
+    </table>
+
+    <h2 data-e="pw31">Unterlagen zum Herunterladen</h2>
+    <p data-e="pw32">Für alle, die gleich bei uns starten wollen: Den Aufnahmeantrag ausfüllen und an den Verein schicken. Für die Ausbildung brauchst du außerdem die Ausbildungsunterlagen.</p>
+    <div class="downloads">
+      <a data-e="pw33" class="btn primary datei" href="../dokumente/aufnahmeantrag.pdf" download>Aufnahmeantrag (PDF)</a>
+      <a data-e="pw34" class="btn ghost datei" href="../dokumente/ausbildungsunterlagen.pdf" download>Ausbildungsunterlagen (PDF)</a>
+    </div>
+    <p data-e="pw35" class="note">Inhalte übernommen von der bisherigen Vereinswebsite – bitte prüfen und ergänzen.</p>
+  </article>
+</main>
+
+<script src="../js/himmel.js"></script>
+<script>
+  const b = document.getElementById('menu-btn'), t = document.getElementById('tabs');
+  b.addEventListener('click', () => b.setAttribute('aria-expanded', t.classList.toggle('open')));
+</script>
+<script src="../js/editor-loader.js"></script>
+</body>
+</html>

@@ -1,40 +1,544 @@
 <!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1f5fa8">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Vereinsorga">
-  <title>Vereinsorga</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="styles.css">
-  <script>
-    // Farbschema sofort setzen, damit beim Start nichts aufblitzt ('light' | 'dark' | sonst automatisch)
-    try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
-  </script>
+<html lang="de"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LSV Regensburg – Segelflug</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&amp;family=Barlow+Condensed:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/stil.css">
 </head>
 <body>
-  <header class="topbar">
-    <button id="backBtn" class="icon-btn" aria-label="Zurück" hidden>&#8592;</button>
-    <h1 id="title">Vereinsorga</h1>
-    <span id="offlineBadge" class="badge" hidden>offline</span>
-    <button id="userBtn" class="user-btn" hidden></button>
-  </header>
-  <main id="view"></main>
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="db.js"></script>
-  <script src="import.js"></script>
-  <script src="firebase.js"></script>
-  <script src="auth.js"></script>
-  <script src="sync.js"></script>
-  <script src="calendar.js"></script>
-  <script src="bayairn.js"></script>
-  <script src="cocktails.js"></script>
-  <script src="einkauf.js"></script>
-  <script src="app.js"></script>
-</body>
-</html>
+
+<canvas id="sky" aria-hidden="true"></canvas>
+<!-- Segelflugzeug im Himmel (Foto: DG 505, D-4961) – Verhalten in js/segelflieger.js -->
+<img id="glider-photo" src="img/segelflugzeug.png" alt="" aria-hidden="true">
+
+<header id="topbar">
+  <a class="brand" href="#start" aria-label="LSV Regensburg – zur Startseite">
+    <!-- Wappen: Datei unter img/wappen-lsv-regensburg.jpg ablegen (PNG/SVG mit transparentem Hintergrund) -->
+    <img src="img/wappen-lsv-regensburg.jpg" alt="Wappen des LSV Regensburg" hidden="" onload="this.hidden=false;this.nextElementSibling.setAttribute('hidden','')">
+    <svg class="shield" viewBox="0 0 44 52" aria-hidden="true">
+      <path d="M2 3h40v22c0 13-9 21-20 25C11 46 2 38 2 25Z" fill="#fff" stroke="#0f2c4c" stroke-width="2.5"></path>
+      <path d="M22 4v45" stroke="#c8102e" stroke-width="2"></path>
+      <text x="22" y="30" text-anchor="middle" font-family="Barlow Condensed" font-weight="700" font-size="11" fill="#0f2c4c">LSV</text>
+    </svg>
+    <span class="name">LSV Regensburg<small>Segelflug</small></span>
+  </a>
+
+  <button id="menu-btn" aria-label="Menü öffnen" aria-expanded="false" aria-controls="tabs">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+  </button>
+
+  <!-- Reiter: Reihenfolge und Texte hier und in seiten.ps1 pflegen -->
+  <ul id="tabs">
+    <li><a href="seiten/mitfliegen.html">Mitfliegen</a></li>
+    <li><a href="seiten/pilot-werden.html">Pilot werden</a></li>
+    <li><a href="seiten/verein.html">Verein</a></li>
+    <li><a href="seiten/jugend.html">Jugend</a></li>
+    <li><a href="seiten/streckenflug.html">Streckenflug</a></li>
+    <li><a href="seiten/werkstatt.html">Werkstatt</a></li>
+    <li><a href="seiten/anflug.html">Anflug für Piloten</a></li>
+    <li><a href="seiten/webcams.html">Webcams</a></li>
+    <li><a href="seiten/flugvorbereitung.html">Flugvorbereitung</a></li>
+  </ul>
+</header>
+
+<nav id="timeline" aria-label="Seitennavigation">
+  <svg id="tl-svg" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <mask id="tl-mask" maskUnits="userSpaceOnUse">
+        <path id="tl-mask-path" fill="none" stroke="#fff" stroke-width="14"></path>
+      </mask>
+    </defs>
+    <path id="tl-base" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="4" stroke-linecap="round" stroke-dasharray="0.1 11"></path>
+    <path id="tl-progress" fill="none" stroke="#0a2350" stroke-width="6" stroke-linecap="round" stroke-dasharray="0.1 11" mask="url(#tl-mask)"></path>
+    <g id="tl-points"></g>
+    <g id="glider-shadow" opacity=".22"><path class="glider-shape" fill="#0b2340"></path></g>
+    <g id="glider">
+      <path class="glider-shape" fill="#fff" stroke="#0f2c4c" stroke-width=".9" stroke-linejoin="round"></path>
+      <ellipse cx="9" cy="0" rx="3.6" ry="1.35" fill="#2c5f8f"></ellipse>
+      <path d="M3.6 -24 L3.4 -27 L1.5 -27.5 L1.3 -24 Z M3.6 24 L3.4 27 L1.5 27.5 L1.3 24 Z" fill="#e2452b"></path>
+    </g>
+  </svg>
+</nav>
+
+<main>
+  <section id="start" data-title="Start">
+    <div class="card">
+      <div data-e="e83" class="eyebrow">LSV Regensburg e.V.</div>
+      <h1 data-e="e4">Lautlos fliegen.<br><span>Gemeinsam.</span></h1>
+      <p data-e="e5" class="lead">Seit 1950 fliegen wir vom Flugplatz Oberhinkofen, 8 km südlich von Regensburg – mit Segelflugzeugen, Motorseglern und Motorflugzeugen. Komm vorbei und flieg mit!</p>
+      <div class="btns">
+        <a data-e="e84" class="btn primary" href="#mitfliegen">Gastflug buchen</a>
+        <a data-e="e85" class="btn ghost" href="#verein">Verein kennenlernen</a>
+      </div>
+      <div class="scroll-hint"><i></i> Scrollen &amp; mitfliegen</div>
+    </div>
+  </section>
+
+  <section id="aktuelles" data-title="Aktuelles">
+    <div class="card">
+      <div data-e="e86" class="eyebrow">02 · Aktuelles</div>
+      <h2 data-e="e6">Neues vom Flugplatz</h2>
+      <!-- Die 3 neuesten Meldungen. Bilder unter img/aktuelles/ ablegen (Querformat, ca. 1200×750 px). -->
+      <div class="news">
+        <!-- NEWS:START -->
+        <a class="news-card" href="aktuelles/jahresabschlussfeier.html">
+          <div class="pic placeholder"><img data-e="nu9d75q-img" src="img/aktuelles/jahresabschlussfeier.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span class="date" data-e="nu9d75q-cd">15.11.2026</span>
+            <h3 data-e="nu9d75q-ct">Jahresabschlussfeier</h3>
+            <p data-e="nu9d75q-ck">Unsere Jahresabschlussfeier war dieses Jahr mal wieder ein voller Erfolg. Ab dem Anzapfen herrschte gute Stimmung und natürlich waren auch frische Leberkassemmmeln mit von der Partie.</p>
+            <span class="more">Weiterlesen →</span>
+          </div>
+        </a>
+        <a class="news-card" href="aktuelles/jugendvergleichsfliegen.html">
+          <div class="pic placeholder"><img data-e="n2evu9q-img" src="img/aktuelles/jugendvergleichsfliegen.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span class="date" data-e="n2evu9q-cd">15.11.2026</span>
+            <h3 data-e="n2evu9q-ct">Jugendvergleichsfliegen</h3>
+            <p data-e="n2evu9q-ck">An unserem Platz fand dieses Jahr drei Tage lang das Jugendvergleichsfliegen statt - ein riesiger Spaß mit Jugendlichen aus der ganzen Oberpfalz.</p>
+            <span class="more">Weiterlesen →</span>
+          </div>
+        </a>
+        <!-- NEWS:END -->
+      </div>
+      <a class="btn ghost more-btn" href="aktuelles/index.html">Alle Meldungen →</a>
+    </div>
+  </section>
+
+  <section id="mitfliegen" data-title="Mitfliegen">
+    <div class="card">
+      <div data-e="e90" class="eyebrow">03 · Mitfliegen</div>
+      <h2 data-e="e13">Einmal selbst über den Wolken</h2>
+      <p data-e="e14" class="lead">Du willst wissen, wie sich Fliegen anfühlt? In unseren doppelsitzigen Segel-/ oder Motorflugzeugen nehmen &nbsp;wir gerne Gäste mit!</p>
+      <ol class="steps">
+        <li><div data-e="e1"><strong>Anfragen</strong> – Direkt <a href="seiten/mitfliegen.html">hier</a> Mitflug Anfragen&nbsp;</div></li>
+        <li><div data-e="e2"><strong>Vorbeikommen</strong> – Mitflüge gibt es meist von April bis Oktober an Wochenenden und Feiertagen bei gutem Wetter.</div></li>
+        <li><div data-e="e3"><strong>Abheben</strong> – mit einem erfahrenen Piloten Regensburg und Umgebung von oben erleben.</div></li>
+      </ol>
+      <div class="grid">
+        <div class="tile"><div data-e="e91" class="meta">Segelflug Windenstart</div><h3 data-e="e15" style="font-size: 25px">Windenstart, ca. 10min</h3><p data-e="e16">Von 0 auf 100 in 3 Sekunden.<br>Beim Windenstart kannst du das Erleben!<br><br>10 Minuten - 20€<br>Verlängerung pro Minute: 1,00€</p></div>
+        <div class="tile"><div data-e="e92" class="meta">Segelflug F-Schlepp</div><div data-e="e93" class="stat" style="font-size: 25px">F-Schlepp 1000Meter</div><p data-e="e17">Ein etwas längeres Flugerlebnis gibt es bei uns im F-Schlepp<br><br><br>20 Minuten - 80€<br>Kunstflug - 90€<br>Verlängerung pro Minute: 1,00€</p></div>
+        <div class="tile"><div data-e="e94" class="meta">Motorsegler / Ultraleicht</div><div data-e="e95" class="stat" style="font-size: 25px">Motorsegler / Ultraleicht</div><p data-e="e18">Motorisiert Abheben, mit unseren Motormaschienen.<br><br><br>Rundflug ca. 20 Minuten - 50€<br>Burgenrundflug ca. 60 Min - 150€<br>Verlängerung pro Minute: 2,50€</p></div>
+      </div>
+      <a data-e="e96" class="btn ghost more-btn" href="seiten/mitfliegen.html">Mehr zu Mitfliegen &amp; Ausbildung →</a>
+    </div>
+  </section>
+
+  <section id="verein" data-title="Verein">
+    <div class="card">
+      <div data-e="e97" class="eyebrow">04 · Verein</div>
+      <h2 data-e="e19">Ehrenamt, das abhebt</h2>
+      <p data-e="e20" class="lead">Im Luftsportverein Regensburg e.&nbsp;V. wird Segel- und Motorflug betrieben. Wir sind eine offiziele Ausbildungseinrichtung und stellen unseren Mitgliedern die Flugzeuge zur Verfügung. Wartung, Windenfahren oder Rasenmähen erledigen wir selbst – Fluglehrer, Funktionäre und der Vorstand arbeitet ehrenamtlich, nur so können wir günstig abheben.</p>
+      <div class="grid">
+        
+        <div class="tile"><div data-e="e99" class="stat">über 130</div><p data-e="e22">Mitglieder</p></div>
+        <div class="tile"><div data-e="e100" class="stat">ca. 70</div><p data-e="e23">aktive Pilotinnen und Piloten</p></div>
+        <div class="tile"><div data-e="e101" class="stat">9</div><p data-e="e24">Vereinsflugzeuge</p></div>
+      </div>
+      <a data-e="e102" class="btn ghost more-btn" href="seiten/verein.html">Mehr zum Verein →</a>
+    </div>
+  </section>
+
+  <section id="flotte" data-title="Flotte">
+    <div class="card">
+      <div data-e="e103" class="eyebrow">05 · Flotte</div>
+      <h2 data-e="e25">Unsere Flugzeuge</h2>
+      <p data-e="e26" class="lead">Unsere Flotte besteht aus Sechs Segelflugzeugen, vom Schulungsdoppelsitzer bis zum Hochleistungseinsitzer.<br>Motorisiert beten wir Motorsegler, ein Motor- sowie ein Ultraleichtflugzeug.</p>
+      <div class="filter" role="group" aria-label="Flugzeugart wählen">
+        <button type="button" data-kind="segel" aria-pressed="true">Segelflugzeuge</button>
+        <button type="button" data-kind="motor" aria-pressed="false">Motorflugzeuge</button>
+        <button type="button" data-kind="ehemalig" aria-pressed="false">Ehemalige</button>
+      </div>
+      <!-- Flugzeug-Karten: data-kind="segel", "motor" oder "ehemalig". Bilder unter img/flotte/ ablegen (Querformat, ca. 1200×750 px). -->
+      <div class="news" id="fleet">
+        <a class="news-card" data-kind="segel" href="flotte/ask13.html">
+          <div class="pic placeholder"><img data-e="e130" src="img/uploads/index-e130-mwhzls2r.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e104" class="date">Doppelsitzer · Anfängerschulung</span>
+            <h3 data-e="e27">ASK 13</h3>
+            <p data-e="e28">Mit der ASK 13 beginnt bei uns die Ausbildung. Der gutmütige Doppelsitzer in Gemischtbauweise ist ideal für die ersten Flüge mit Fluglehrer.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="segel" href="flotte/ka8b.html">
+          <div class="pic placeholder"><img data-e="e131" src="img/flotte/ka8b.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e105" class="date">Einsitzer · Schulung</span>
+            <h3 data-e="e29">Ka 8b</h3>
+            <p data-e="e30">Der klassische Einsitzer für die ersten Alleinflüge. Hier sammeln Flugschüler ihre ersten Alleinflug Erfahrungen.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="segel" href="flotte/ask21.html">
+          <div class="pic placeholder"><img data-e="e132" src="img/uploads/index-e132-mwj3lhde.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e106" class="date">Doppelsitzer · Schulung &amp; Gastflug</span>
+            <h3 data-e="e31">ASK 21</h3>
+            <p data-e="e32">Moderner Kunststoff-Doppelsitzer für die fortgeschrittene Ausbildung. In der ASK 21 nehmen wir auch gerne Gäste mit.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="segel" href="flotte/discuscs.html">
+          <div class="pic placeholder"><img data-e="e133" src="img/uploads/index-e133-mwdyyqsu.png" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e107" class="date">Einsitzer · Leistung</span>
+            <h3 data-e="e33">Discus CS</h3>
+            <p data-e="e34">Leistungsstarker Einsitzer der Clubklasse. Mit dem Discus geht es auf die ersten großen Streckenflüge.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="segel" href="flotte/ventus2b.html">
+          <div class="pic placeholder"><img data-e="e134" src="img/flotte/ventus2b.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e108" class="date">Einsitzer · Hochleistung</span>
+            <h3 data-e="e35">Ventus 2b</h3>
+            <p data-e="e36">Unser Hochleistungs-Einsitzer mit einer Gleitzahl von 1:48. Mit Wasserballast ist er für lange Strecken an starken Thermiktagen gemacht.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="segel" href="flotte/dg505.html">
+          <div class="pic placeholder"><img data-e="e135" src="img/flotte/dg505.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e109" class="date">Doppelsitzer · Leistung &amp; Kunstflug</span>
+            <h3 data-e="e37">DG 505</h3>
+            <p data-e="e38">Leistungsdoppelsitzer mit 20 m Spannweite. Mit kurzen Flächen (18 m) ist er auch für den Kunstflug geeignet.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="motor" href="flotte/hk36.html">
+          <div class="pic placeholder"><img data-e="e137" src="img/uploads/index-e137-mwi7htlp.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e111" class="date">Motorsegler · Reise</span>
+            <h3 data-e="e41">HK 36 TTC Super Dimona</h3>
+            <p data-e="e42">Moderner Reisemotorsegler aus Kunststoff mit 115-PS-Turbomotor. Schnell, komfortabel und mit guter Gleitleistung.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="motor" href="flotte/citabria.html">
+          <div class="pic placeholder"><img data-e="e138" src="img/flotte/citabria.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e112" class="date">Motorflugzeug · Schlepp</span>
+            <h3 data-e="e43">American Champion Citabria</h3>
+            <p data-e="e44">Unser Schleppflugzeug mit 160 PS. Es bringt die Segelflugzeuge im F-Schlepp in die Luft und dient auch der Echo-Schulung.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="motor" href="flotte/a22.html">
+          <div class="pic placeholder"><img data-e="e139" src="img/flotte/a22.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e113" class="date">Ultraleicht · Schlepp</span>
+            <h3 data-e="e45">Aeroprakt A-22</h3>
+            <p data-e="e46">Zweisitziges Ultraleichtflugzeug mit 100 PS. Bei uns kommt es vor allem als Schleppflugzeug zum Einsatz.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="ehemalig" href="flotte/sf25c.html">
+          <div class="pic placeholder"><img data-e="e136" src="img/flotte/sf25c.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span data-e="e110" class="date">Motorsegler · ehemals Umschulung</span>
+            <h3 data-e="e39">Scheibe SF25C Falke (D-KLEX)</h3>
+            <p data-e="e40">Der Motorsegler für die Umschulung zum Motorseglerpiloten. Er startet selbstständig und kann im Flug auch segeln.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="ehemalig" href="flotte/asw19.html">
+          <div class="pic placeholder"><img data-e="xasw19-ci" src="img/flotte/asw19.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span class="date" data-e="xasw19-cm">Einsitzer · ehemals Segelflugzeug</span>
+            <h3 data-e="xasw19-cn">ASW 19</h3>
+            <p data-e="xasw19-ck">Der Einsitzer für Thermik- und Überlandflüge. Mit einer Gleitzahl von rund 39 kam man aus 1.000 m Höhe etwa 39 km weit.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="ehemalig" href="flotte/taifun17e.html">
+          <div class="pic placeholder"><img data-e="xtaifun17e-ci" src="img/flotte/taifun17e.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span class="date" data-e="xtaifun17e-cm">Motorsegler · ehemals Reise</span>
+            <h3 data-e="xtaifun17e-cn">Valentin Taifun 17E</h3>
+            <p data-e="xtaifun17e-ck">Schneller Reisemotorsegler mit Einziehfahrwerk, Verstellpropeller und Wölbklappen – einer der schnellsten seiner Art.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="ehemalig" href="flotte/rallye180td.html">
+          <div class="pic placeholder"><img data-e="xrallye180td-ci" src="img/flotte/rallye180td.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span class="date" data-e="xrallye180td-cm">Motorflugzeug · ehemals Schlepp &amp; Reise</span>
+            <h3 data-e="xrallye180td-cn">Morane Rallye 180TD</h3>
+            <p data-e="xrallye180td-ck">Viersitziges Motorflugzeug für Reisen, Schlepp und Rundflüge – gutmütig und sehr kurzstartfähig.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+        <a class="news-card" data-kind="ehemalig" href="flotte/sf25c-kddf.html">
+          <div class="pic placeholder"><img data-e="xsf25ckddf-ci" src="img/flotte/sf25c-kddf.jpg" alt="" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+          <div class="body">
+            <span class="date" data-e="xsf25ckddf-cm">Motorsegler · ehemals Umschulung</span>
+            <h3 data-e="xsf25ckddf-cn">Scheibe SF25C Falke (D-KDDF)</h3>
+            <p data-e="xsf25ckddf-ck">Der erste C-Falke des Vereins. Mit ihm schulten Segelflieger auf den Motorsegler um.</p>
+            <span class="more">Mehr erfahren →</span>
+          </div>
+        </a>
+      </div>
+      
+    </div>
+  </section>
+
+  <section id="jugend" data-title="Jugend">
+    <div class="card">
+      <div data-e="e114" class="eyebrow">06 · Jugend</div>
+      <h2 data-e="e47">Fliegen, bevor du Auto fährst</h2>
+      <p data-e="e48" class="lead">Unsere aktive Jugendgruppe ist für alle zwischen 14 und 27 Jahren. <br>Wir freuen uns immer sehr über Neuzugang!</p>
+      <!-- Zwei Bilder: img/jugend/bild-1.jpg und img/jugend/bild-2.jpg (Querformat) -->
+      <div class="photos">
+        <div class="pic placeholder"><img data-e="e140" src="img/uploads/index-e140-mwgtmzvx.jpg" alt="Jugendgruppe des LSV Regensburg" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+        <div class="pic placeholder"><img data-e="e141" src="img/uploads/index-e141-mwhzoxdj.jpg" alt="Jugendgruppe des LSV Regensburg" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+      </div>
+      <a data-e="e115" class="btn ghost more-btn" href="seiten/jugend.html">Mehr zur Jugend →</a>
+    </div>
+  </section>
+
+  <section id="pilot-werden" data-title="Pilot werden">
+    <div class="card">
+      <div data-e="pw-e1" class="eyebrow">07 · Pilot werden</div>
+      <h2 data-e="pw-e2">Dein Weg zur Segelfluglizenz</h2>
+      <p data-e="pw-e3" class="lead">Bei uns lernst du das Segelfliegen von ehrenamtlichen Fluglehrern – im Verein und damit günstiger, als die meisten denken. Gefragt sind vor allem Zeit und Engagement.</p>
+      <div class="grid">
+        <div class="tile"><div data-e="pw-e4" class="meta">Ab 14 Jahren</div><h3 data-e="pw-e5">Früh starten</h3><p data-e="pw-e6">Mit 14 beginnt die Ausbildung, zum 16. Geburtstag gibt es den Luftfahrerschein.</p></div>
+        <div class="tile"><div data-e="pw-e7" class="meta">Ausbildungsweg</div><h3 data-e="pw-e8">ASK 13 → Ka 8 → ASK 21 → Discus</h3><p data-e="pw-e9">Erst mit Fluglehrer, nach rund 50 Starts der erste Alleinflug.</p></div>
+        <div class="tile"><div data-e="pw-e10" class="meta">Theorie &amp; Prüfung</div><h3 data-e="pw-e11">Im Winter lernen</h3><p data-e="pw-e12">Theorie in den Wintermonaten, danach Prüfung beim Luftamt und praktische Prüfung.</p></div>
+      </div>
+      <div class="btns more-btn">
+        <a data-e="pw-e13" class="btn ghost" href="seiten/pilot-werden.html">Alles zum Pilot werden →</a>
+        <a data-e="pw-e14" class="btn primary datei" href="dokumente/aufnahmeantrag.pdf" download>Aufnahmeantrag (PDF)</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="streckenflug" data-title="Streckenflug">
+    <div class="card">
+      <div data-e="e116" class="eyebrow">08 · Streckenflug</div>
+      <h2 data-e="e49">Hunderte Kilometer ohne Motor</h2>
+      <p data-e="e50" class="lead">Von Aufwind zu Aufwind, unter Wolkenstraßen entlang, Streckenflüge sind die Königsdisziplin des Segelflugs.</p>
+      <div class="grid">
+        <div class="tile"><div data-e="e117" class="meta">StreckenrekordE</div><div data-e="e118" class="stat">1.350+ <small>km</small></div><p data-e="e51">Michael Sommer</p></div>
+        <div class="tile"><div data-e="e119" class="meta">Weglide</div><h3 data-e="e52">Flüge auf <a href="https://www.weglide.org/flight?airport=Oberhinkofen,152851">WEGLIDE</a> ansehen</h3><p data-e="e53">Streckenflüge unserer Piloten aus Oberhinkofen können auf WeGlide verfolgt werden</p></div>
+        <div class="tile"><div data-e="e120" class="meta">Flugzeuge</div><h3 data-e="e54">Discus, Ventus, DG 505</h3><p data-e="e55">Leistungsflugzeuge vom Hochleistungseinsitzer bis zum Doppelsitzer.</p></div>
+      </div>
+      <a data-e="e121" class="btn ghost more-btn" href="seiten/streckenflug.html">Mehr zum Streckenflug →</a>
+    </div>
+  </section>
+
+  <section id="werkstatt" data-title="Werkstatt">
+    <div class="card">
+      <div data-e="e122" class="eyebrow">09 · Werkstatt</div>
+      <h2 data-e="e56">Winterarbeit - ein Teil der Fliegerei</h2>
+      <p data-e="e57" class="lead">Wenn die Saison vorbei ist, steht die Jährliche Winterwartung unserer Flugzeuge an. Von der ASK 13 über ASK 21 bishin zum Ventus. Als Verein erledigen wir Wartung und Pflege unserer Flugzeuge sowie Fahrzeuge selbt.</p>
+      <!-- Zwei Bilder: img/werkstatt/bild-1.jpg und img/werkstatt/bild-2.jpg (Querformat) -->
+      <div class="photos">
+        <div class="pic placeholder"><img data-e="e142" src="img/uploads/index-e142-mwgthq41.jpg" alt="Werkstatt des LSV Regensburg" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+        <div class="pic placeholder"><img data-e="e143" src="img/uploads/index-e143-mwhto2e4.jpg" alt="Werkstatt des LSV Regensburg" onerror="this.hidden=true" onload="this.parentElement.classList.remove('placeholder')"></div>
+      </div>
+      <a data-e="e123" class="btn ghost more-btn" href="seiten/werkstatt.html">Mehr zur Werkstatt →</a>
+    </div>
+  </section>
+
+  <section id="anflug" data-title="Anflug">
+    <div class="card">
+      <div data-e="e124" class="eyebrow">10 · Anflug für Piloten</div>
+      <h2 data-e="e58">Flugplatz Oberhinkofen</h2>
+      <p data-e="e59" class="warn"><strong>Hinweis:</strong> Angaben laut bisheriger Vereinswebsite, ohne Gewähr. Vor jedem Flug die aktuellen Daten (AIP VFR, NOTAMs) prüfen und bei der Flugleitung nachfragen.</p>
+      <table class="ad">
+        <tbody><tr><th data-e="e60">Frequenz</th><td data-e="e61">133.260 MHz</td></tr>
+        <tr><th data-e="e62">Koordinaten</th><td data-e="e63">48° 57' 09,3" N / 12° 08' 54,2" E</td></tr>
+        <tr><th data-e="e64">Piste</th><td data-e="e65">05/23 · 600 m · Gras</td></tr>
+        <tr><th data-e="e66">Zugelassen für</th><td data-e="e67">Segelflugzeuge, Motorsegler, Ultraleicht</td></tr>
+        <tr><th data-e="e68">Platzrunde</th><td data-e="e69">Segelflugzeuge im Norden, Motorsegler im Süden, 2300 ft MSL</td></tr>
+        <tr><th data-e="e70">Startarten</th><td data-e="e71">F-Schlepp und Windenstart</td></tr>
+        <tr><th data-e="e72">Betrieb</th><td data-e="e73">Saison April bis Oktober, vor allem an Wochenenden und Feiertagen, ca. 9 bis 18 Uhr</td></tr>
+        <tr><th data-e="e74">Achtung</th><td data-e="e75">Stromleitungen ca. 600 m vor Schwelle 05 (etwa Nord-Süd). Ortschaften nicht direkt überfliegen. Windenschleppstrecke nicht überqueren, Piste nicht betreten.</td></tr>
+        <tr><th data-e="e76">Flugleitung</th><td data-e="e77"><a href="tel:09453 7244">09453 7244</a></td></tr>
+      </tbody></table>
+      <a data-e="e125" class="btn ghost more-btn" href="seiten/anflug.html">Alle Infos für Piloten →</a>
+    </div>
+  </section>
+
+  <section id="kontakt" data-title="Kontakt">
+    <div class="card">
+      <div data-e="e126" class="eyebrow">11 · Kontakt</div>
+      <h2 data-e="e78">Interesse geweckt?</h2>
+      <div class="grid" style="align-items:start">
+        <div>
+          <p data-e="e79" class="lead" style="margin-bottom:16px">Schreib uns einfach, oder komm an einem Flugtag bei uns vorbei. Wir freuen uns auf dich!</p>
+          <p data-e="e80"><strong>Luftsportverein Regensburg e.&nbsp;V.</strong><br>Postfach 1126<br>93081 Obertraubling</p>
+          <p data-e="e81" style="margin-top:12px"><strong>Flugplatz</strong> (Navi): Einthal, 93083 Obertraubling<br>Telefon Flugplatz: <a href="tel:09453 7244">09453 7244</a></p>
+          <p data-e="e82" style="margin-top:12px">info@luftsportverein-regensburg.de<br>Mitfliegen: mitflug@luftsportverein-regensburg.de<br>Ausbildung: ausbildung@luftsportverein-regensburg.de</p>
+        </div>
+        <form id="contact-form">
+          <input name="name" placeholder="Name" required="">
+          <input name="mail" type="email" placeholder="E-Mail" required="">
+          <textarea name="msg" placeholder="Nachricht" required=""></textarea>
+          <button class="btn primary" type="submit" style="cursor:pointer;justify-self:start">Nachricht senden</button>
+        </form>
+      </div>
+      <!-- Eigene Karte des Flugplatzes (img/karte-flugplatz.svg, Daten: OpenStreetMap) -->
+      <h3 data-e="map-h" class="zwischen">So findest du zu uns</h3>
+      <div class="karte">
+        <img src="img/karte-flugplatz.svg" width="1200" height="806" loading="lazy"
+             alt="Karte: Der Flugplatz Oberhinkofen liegt zwischen Oberhinkofen, Piesenkofen und Egglfing südlich von Obertraubling. Navi-Adresse: Einthal, 93083 Obertraubling.">
+      </div>
+      <footer><span>© 2026 Luftsportverein Regensburg e.&nbsp;V.</span><a href="seiten/impressum.html">Impressum</a><a href="#">Datenschutz</a><a href="#bearbeiten" rel="nofollow">Bearbeiten</a></footer>
+    </div>
+  </section>
+</main>
+
+<script src="js/himmel.js"></script>
+<script src="js/segelflieger.js"></script>
+<script src="js/segelflieger3d.js"></script>
+
+<script>
+(() => {
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+
+  /* ================= Kopfleiste ================= */
+  const menuBtn = document.getElementById('menu-btn');
+  const tabs = document.getElementById('tabs');
+  menuBtn.addEventListener('click', () => {
+    const open = tabs.classList.toggle('open');
+    menuBtn.setAttribute('aria-expanded', open);
+  });
+  tabs.addEventListener('click', e => {
+    if (e.target.closest('a')){ tabs.classList.remove('open'); menuBtn.setAttribute('aria-expanded', false); }
+  });
+
+  /* ================= Timeline ================= */
+  const sections = [...document.querySelectorAll('main section')];
+  const svg = document.getElementById('tl-svg');
+  const base = document.getElementById('tl-base');
+  const progEl = document.getElementById('tl-progress');
+  const maskPath = document.getElementById('tl-mask-path');
+  const pointsG = document.getElementById('tl-points');
+  const glider = document.getElementById('glider');
+  const gliderShadow = document.getElementById('glider-shadow');
+  const GLIDER = 'M16 0 C14 -1.6 8 -2.2 5 -2.1 L3.6 -27 L1.4 -27.6 L0 -2 L-13.5 -0.9 L-14.5 -0.8 L-15.6 -8.5 L-17.8 -8.5 L-18 -0.6 L-18 0.6 L-17.8 8.5 L-15.6 8.5 L-14.5 0.8 L-13.5 0.9 L0 2 L1.4 27.6 L3.6 27 L5 2.1 C8 2.2 14 1.6 16 0 Z';
+  document.querySelectorAll('.glider-shape').forEach(p => p.setAttribute('d', GLIDER));
+
+  let pathLen = 0, markers = [], labels = [], markerLens = [];
+  const N = sections.length;
+  const headerH = () => document.getElementById('topbar').offsetHeight;
+
+  function buildTimeline(){
+    const mobile = innerWidth <= 820;
+    const H = svg.clientHeight, top = 34, bottom = H - 34;
+    const cx = mobile ? 30 : 48, A = mobile ? 10 : 20;
+    const turns = 2; // sanft S-förmig geschwungene Linie
+    let d = '';
+    for (let i = 0; i <= 240; i++){
+      const t = i / 240;
+      const y = top + t * (bottom - top);
+      const x = cx - A * Math.cos(t * turns * Math.PI);
+      d += (i ? 'L' : 'M') + x.toFixed(2) + ' ' + y.toFixed(2);
+    }
+    [base, progEl, maskPath].forEach(p => p.setAttribute('d', d));
+    pathLen = base.getTotalLength();
+
+    pointsG.innerHTML = '';
+    markers = []; labels = []; markerLens = [];
+    sections.forEach((s, i) => {
+      const len = pathLen * i / (N - 1);
+      const pt = base.getPointAtLength(len);
+      markerLens.push(len);
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', pt.x); c.setAttribute('cy', pt.y); c.setAttribute('r', 6);
+      c.setAttribute('class', 'tl-marker');
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', pt.x + 16); t.setAttribute('y', pt.y + 5);
+      t.setAttribute('class', 'tl-label');
+      t.textContent = s.dataset.title;
+      const go = () => s.scrollIntoView({behavior: reduceMotion ? 'auto' : 'smooth'});
+      c.addEventListener('click', go); t.addEventListener('click', go);
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = s.dataset.title; c.appendChild(title);
+      pointsG.append(c, t);
+      markers.push(c); labels.push(t);
+    });
+  }
+
+  // Flugzeug steht exakt auf dem Punkt, wenn die Mitte einer Sektion in der Mitte des sichtbaren Bereichs ist
+  function targetProgress(){
+    const hh = headerH();
+    const visH = innerHeight - hh;
+    const docH = document.documentElement.scrollHeight;
+    const centers = sections.map(s => s.offsetTop + s.offsetHeight / 2);
+    centers[0] = Math.min(centers[0], hh + visH / 2);
+    centers[N - 1] = Math.min(centers[N - 1], docH - visH / 2);
+    const anchor = scrollY + hh + visH / 2;
+    if (anchor <= centers[0]) return 0;
+    if (anchor >= centers[N - 1]) return 1;
+    let i = 0;
+    while (i < N - 2 && centers[i + 1] <= anchor) i++;
+    return (i + (anchor - centers[i]) / (centers[i + 1] - centers[i])) / (N - 1);
+  }
+
+  function drawGlider(p){
+    const len = Math.max(0.5, Math.min(pathLen - 0.5, p * pathLen));
+    const a = base.getPointAtLength(len - 0.5), b = base.getPointAtLength(len + 0.5);
+    const pt = base.getPointAtLength(len);
+    const ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+    glider.setAttribute('transform', `translate(${pt.x} ${pt.y}) rotate(${ang}) scale(1.15)`);
+    gliderShadow.setAttribute('transform', `translate(${pt.x + 7} ${pt.y + 10}) rotate(${ang}) scale(1.05)`);
+    maskPath.setAttribute('stroke-dasharray', `${len} ${pathLen}`);
+    const active = Math.round(p * (N - 1));
+    markers.forEach((m, i) => {
+      m.classList.toggle('passed', markerLens[i] <= len + 1);
+      m.classList.toggle('active', i === active);
+      m.setAttribute('r', i === active ? 8 : 6);
+      labels[i].classList.toggle('active', i === active);
+      if (i === active) m.setAttribute('aria-current', 'step'); else m.removeAttribute('aria-current');
+    });
+  }
+
+  /* ================= Loop ================= */
+  let progress = 0;
+  function frame(t){
+    const target = targetProgress();
+    progress += (target - progress) * (reduceMotion ? 1 : 0.12);
+    if (Math.abs(target - progress) < 0.0005) progress = target;
+    drawGlider(progress);
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', buildTimeline);
+  buildTimeline();
+  progress = targetProgress();
+  requestAnimationFrame(frame);
+
+  /* Flotte: Auswahl Segel-/Motorflugzeuge */
+  const filterBtns = document.querySelectorAll('.filter button');
+  const showKind = (kind) => {
+    filterBtns.forEach(b => b.setAttribute('aria-pressed', b.dataset.kind === kind));
+    document.querySelectorAll('#fleet .news-card').forEach(c => { c.hidden = c.dataset.kind !== kind; });
+  };
+  filterBtns.forEach(b => b.addEventListener('click', () => showKind(b.dataset.kind)));
+  // Rückkehr von einer Detailseite (#flotte-segel / #flotte-motor / #flotte-ehemalig): passende Auswahl zeigen
+  const m = location.hash.match(/^#flotte-(segel|motor|ehemalig)$/);
+  showKind(m ? m[1] : 'segel');
+  if (m) requestAnimationFrame(() => document.getElementById('flotte').scrollIntoView());
+
+  /* Kontaktformular -> Mailprogramm (Adresse ergänzen) */
+  const MAIL = 'info@luftsportverein-regensburg.de';
+  document.getElementById('contact-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = e.target;
+    const body = encodeURIComponent(`${f.msg.value}\n\n${f.name.value} (${f.mail.value})`);
+    location.href = `mailto:${MAIL}?subject=${encodeURIComponent('Anfrage über die Website')}&body=${body}`;
+  });
+})();
+</script>
+<script src="js/editor-loader.js"></script>
+
+
+
+</body></html>
