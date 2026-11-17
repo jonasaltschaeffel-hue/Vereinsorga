@@ -104,6 +104,51 @@ const Cal = (() => {
     longDate, shortDate, nthOf, isLastWeek, WD, WD_SHORT, MONTHS };
 })();
 
+// ---------- Schulferien Bayern ----------
+// Quelle: Ferienordnung für die Schuljahre 2024/2025 bis 2029/2030,
+// Bayerisches Ministerialblatt 2022 Nr. 747 (abgeglichen mit km.bayern.de, Stand 15.09.2026).
+// „Herbstferien“ heißen dort „unterrichtsfreie Tage um Allerheiligen“.
+const BAY_SCHOOL_HOLIDAYS = [
+  ['Sommerferien', '2024-07-29', '2024-09-09'], ['Herbstferien', '2024-10-28', '2024-10-31'],
+  ['Weihnachtsferien', '2024-12-23', '2025-01-03'], ['Frühjahrsferien', '2025-03-03', '2025-03-07'],
+  ['Osterferien', '2025-04-14', '2025-04-25'], ['Pfingstferien', '2025-06-10', '2025-06-20'],
+  ['Sommerferien', '2025-08-01', '2025-09-15'], ['Herbstferien', '2025-11-03', '2025-11-07'],
+  ['Weihnachtsferien', '2025-12-22', '2026-01-05'], ['Frühjahrsferien', '2026-02-16', '2026-02-20'],
+  ['Osterferien', '2026-03-30', '2026-04-10'], ['Pfingstferien', '2026-05-26', '2026-06-05'],
+  ['Sommerferien', '2026-08-03', '2026-09-14'], ['Herbstferien', '2026-11-02', '2026-11-06'],
+  ['Weihnachtsferien', '2026-12-24', '2027-01-08'], ['Frühjahrsferien', '2027-02-08', '2027-02-12'],
+  ['Osterferien', '2027-03-22', '2027-04-02'], ['Pfingstferien', '2027-05-18', '2027-05-28'],
+  ['Sommerferien', '2027-08-02', '2027-09-13'], ['Herbstferien', '2027-11-02', '2027-11-05'],
+  ['Weihnachtsferien', '2027-12-24', '2028-01-07'], ['Frühjahrsferien', '2028-02-28', '2028-03-03'],
+  ['Osterferien', '2028-04-10', '2028-04-21'], ['Pfingstferien', '2028-06-06', '2028-06-16'],
+  ['Sommerferien', '2028-07-31', '2028-09-11'], ['Herbstferien', '2028-10-30', '2028-11-03'],
+  ['Weihnachtsferien', '2028-12-23', '2029-01-05'], ['Frühjahrsferien', '2029-02-12', '2029-02-16'],
+  ['Osterferien', '2029-03-26', '2029-04-06'], ['Pfingstferien', '2029-05-22', '2029-06-01'],
+  ['Sommerferien', '2029-07-30', '2029-09-10'], ['Herbstferien', '2029-10-29', '2029-11-02'],
+  ['Weihnachtsferien', '2029-12-24', '2030-01-04'], ['Frühjahrsferien', '2030-03-04', '2030-03-08'],
+  ['Osterferien', '2030-04-15', '2030-04-26'], ['Pfingstferien', '2030-06-11', '2030-06-21'],
+  ['Sommerferien', '2030-07-29', '2030-09-09'],
+];
+const HOLIDAYS_FROM = '2024-07-29', HOLIDAYS_UNTIL = '2030-09-09';
+const showHolidays = () => localStorage.getItem('calHolidays') === '1';
+
+// Buß- und Bettag (in Bayern schulfrei): Mittwoch vor dem 23. November
+function bussUndBettag(year) {
+  const nov22 = new Date(Date.UTC(year, 10, 22));
+  return Cal.toKey(new Date(nov22.getTime() - ((nov22.getUTCDay() - 3 + 7) % 7) * 864e5));
+}
+
+// Alle Ferien(-tage), die den Zeitraum berühren
+function holidaysIn(from, to) {
+  const list = BAY_SCHOOL_HOLIDAYS.map(([name, start, end]) => ({ name, start, end }));
+  for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) {
+    const d = bussUndBettag(y);
+    if (d >= HOLIDAYS_FROM && d <= HOLIDAYS_UNTIL) list.push({ name: 'Buß- und Bettag', start: d, end: d, day: true });
+  }
+  return list.filter(h => h.start <= to && h.end >= from);
+}
+const holidayRange = h => h.start === h.end ? Cal.shortDate(h.start) : `${Cal.shortDate(h.start)} – ${Cal.shortDate(h.end)}`;
+
 // ---------- Kalender-Seite ----------
 const calState = { month: sessionStorage.getItem('calMonth') || Cal.todayKey().slice(0, 7), selected: sessionStorage.getItem('calSel') || Cal.todayKey() };
 const DEFAULT_CATEGORIES = [
@@ -161,13 +206,24 @@ async function renderKalender() {
   }
   const edit = canEditCal();
 
+  // Schulferien Bayern (ein-/ausschaltbar, Einstellung pro Gerät)
+  const holOn = showHolidays();
+  const hols = holOn ? holidaysIn(gridStart, gridEnd) : [];
+  const holOf = day => hols.find(h => day >= h.start && day <= h.end);
+  const outOfRange = holOn && (gridEnd < HOLIDAYS_FROM || gridStart > HOLIDAYS_UNTIL);
+
   const cells = [];
   for (let i = 0; i < 42; i++) {
     const day = Cal.addDays(gridStart, i);
     const list = byDay.get(day) || [];
+    const hol = holOf(day);
+    // Ferienname am ersten Ferientag und an jedem Montag einer Ferienwoche zeigen
+    const holLabel = hol && (day === hol.start || Cal.weekday(day) === 0 || i === 0);
     cells.push(`
-      <button class="cal-day ${day.slice(0, 7) !== calState.month ? 'other' : ''} ${day === today ? 'today' : ''} ${day === calState.selected ? 'selected' : ''}" data-day="${day}">
+      <button class="cal-day ${day.slice(0, 7) !== calState.month ? 'other' : ''} ${day === today ? 'today' : ''} ${day === calState.selected ? 'selected' : ''} ${hol ? 'holiday' : ''}" data-day="${day}"
+        ${hol ? `title="${esc(hol.name)}: ${holidayRange(hol)}"` : ''}>
         <span class="cal-num">${Number(day.slice(8))}</span>
+        ${holLabel ? `<span class="cal-hol">🏖 ${esc(hol.name)}</span>` : ''}
         <span class="cal-chips">${list.slice(0, 3).map(x => `
           <span class="cal-chip ${x.dur ? 'multi' : ''}" style="--c:${color(x.ev)}">${x.dayIndex > 0 ? '↳ ' : ''}${!x.ev.allDay && x.dayIndex === 0 && x.ev.startTime ? x.ev.startTime + ' ' : ''}${esc(x.ev.title)}</span>`).join('')}
           ${list.length > 3 ? `<span class="cal-more">+${list.length - 3} weitere</span>` : ''}
@@ -177,6 +233,7 @@ async function renderKalender() {
   }
 
   const selList = byDay.get(calState.selected) || eventsByDay(events, calState.selected, calState.selected).get(calState.selected) || [];
+  const selHol = holOf(calState.selected);
 
   view.innerHTML = `
     <div class="cal-head">
@@ -185,9 +242,12 @@ async function renderKalender() {
       <button class="btn small" id="calNext" aria-label="Nächster Monat">›</button>
       <button class="btn small" id="calToday">Heute</button>
       <span class="grow"></span>
+      <label class="check cal-toggle"><input type="checkbox" id="calHol" ${holOn ? 'checked' : ''}> 🏖 Schulferien Bayern</label>
       ${edit ? '<button class="btn small" id="calCats">Kategorien</button><button class="btn primary small" id="calNew">+ Termin</button>' : ''}
     </div>
-    ${cats.length ? `<div class="cal-legend">${cats.map(c => `<span><i style="--c:${c.color}"></i>${esc(c.name)}</span>`).join('')}</div>` : ''}
+    ${cats.length || holOn ? `<div class="cal-legend">${cats.map(c => `<span><i style="--c:${c.color}"></i>${esc(c.name)}</span>`).join('')}
+      ${holOn ? '<span><i class="hol-swatch"></i>Schulferien Bayern</span>' : ''}</div>` : ''}
+    ${outOfRange ? '<p class="muted" style="font-size:14px;margin:0 0 10px">Für diesen Zeitraum sind keine Ferientermine hinterlegt (vorhanden: Sommer 2024 bis Sommer 2030).</p>' : ''}
     <div class="cal-grid">
       ${Cal.WD_SHORT.map(d => `<div class="cal-wd">${d}</div>`).join('')}
       ${cells.join('')}
@@ -197,7 +257,8 @@ async function renderKalender() {
         <h2>${Cal.longDate(calState.selected)}</h2>
         ${edit ? '<button class="btn small" id="calNewDay">+ Termin an diesem Tag</button>' : ''}
       </div>
-      ${selList.length ? `<ul class="list">${selList.map((x, i) => `
+      ${selHol ? `<p class="cal-hol-note">🏖 <strong>${esc(selHol.name)}</strong> in Bayern · ${selHol.day ? 'schulfrei' : holidayRange(selHol)}</p>` : ''}
+      ${selList.length ?`<ul class="list">${selList.map((x, i) => `
         <li class="cal-item" data-i="${i}">
           <span class="cal-bar" style="--c:${color(x.ev)}"></span>
           <span class="grow"><strong>${esc(x.ev.title)}</strong>
@@ -213,6 +274,10 @@ async function renderKalender() {
     sessionStorage.setItem('calMonth', calState.month);
     renderKalender();
   };
+  document.getElementById('calHol').addEventListener('change', ev => {
+    localStorage.setItem('calHolidays', ev.target.checked ? '1' : '0');
+    renderKalender();
+  });
   document.getElementById('calPrev').onclick = () => go2(-1);
   document.getElementById('calNext').onclick = () => go2(1);
   document.getElementById('calToday').onclick = () => {
