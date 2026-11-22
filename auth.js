@@ -8,19 +8,38 @@
 // auch ohne Internet anmelden. Dafür wird ein Prüfwert des Passworts (PBKDF2-Hash, nie
 // das Passwort selbst) auf dem Gerät gespeichert.
 const Auth = (() => {
-  const PERMS = [
-    ['ausgabe', 'Getränkeausgabe durchführen'],
-    ['einrichtung', 'Personen & Getränke verwalten'],
-    ['abrechnung', 'Abrechnung & Zahlungen'],
-    ['statistik', 'Statistik ansehen'],
-    ['bayairn', 'BayAirn: Teilnehmer & Konten'],
-    ['cocktails', 'Cocktails ansehen'],
-    ['cocktails_bearbeiten', 'Cocktails bearbeiten'],
-    ['kalender', 'Kalender ansehen'],
-    ['kalender_bearbeiten', 'Kalender bearbeiten'],
-    ['einstellungen', 'Einstellungen & Sicherung'],
-    ['admin', 'Admin: Benutzer & Rechte verwalten (darf alles)'],
+  // Rechte nach Bereichen gruppiert. Die Gruppen-ID entspricht der ID der Startseiten-Kachel
+  // (MODULES in app.js), damit beim Bereich angezeigt werden kann, ob die Kachel ausgeblendet ist.
+  // Neue Rechte: in die passende Gruppe eintragen [key, Beschriftung, Kurzname].
+  const PERM_GROUPS = [
+    { id: 'basis', emoji: '🧩', name: 'Grundlegendes', perms: [
+      ['einstellungen', 'Einstellungen & Sicherung', 'Einstellungen'],
+      ['admin', 'Admin: Benutzer & Rechte verwalten (darf alles)', 'Admin'],
+    ] },
+    { id: 'getraenke', emoji: '🥤', name: 'Getränkevergabe', perms: [
+      ['ausgabe', 'Getränkeausgabe durchführen', 'Ausgabe'],
+      ['einrichtung', 'Personen & Getränke verwalten', 'Einrichtung'],
+      ['abrechnung', 'Abrechnung & Zahlungen', 'Abrechnung'],
+      ['statistik', 'Statistik ansehen', 'Statistik'],
+    ] },
+    { id: 'bayairn', emoji: '✈️', name: 'BayAirn', perms: [
+      ['bayairn', 'Teilnehmer & Konten', 'BayAirn'],
+    ] },
+    { id: 'cocktails', emoji: '🍹', name: 'Cocktails', perms: [
+      ['cocktails', 'Cocktails ansehen', 'Cocktails'],
+      ['cocktails_bearbeiten', 'Cocktails bearbeiten', 'Cocktails ✎'],
+    ] },
+    { id: 'kalender', emoji: '📅', name: 'Kalender', perms: [
+      ['kalender', 'Kalender ansehen', 'Kalender'],
+      ['kalender_bearbeiten', 'Kalender bearbeiten', 'Kalender ✎'],
+    ] },
   ];
+  const PERMS = PERM_GROUPS.flatMap(g => g.perms.map(([k, l]) => [k, l]));
+  const PERM_SHORT = Object.fromEntries(PERM_GROUPS.flatMap(g => g.perms.map(([k, , s]) => [k, s])));
+
+  // Ausgeblendete Startseiten-Kacheln: gilt für alle Benutzer (config/modules in Firestore,
+  // auf dem Gerät zwischengespeichert, damit es auch offline gilt).
+  const LS_MODULES = 'cfg.hiddenModules';
   const MIN_PASSWORD = 6; // Mindestlänge von Firebase
   const LS_AUTH = 'fb.auth';        // Firebase-Sitzung { uid, idToken, refreshToken, exp }
   const LS_CACHE = 'fb.members';    // { [nameKey]: { uid, name, perms, active, email, verifier } }
@@ -111,7 +130,34 @@ const Auth = (() => {
       || updated.approved !== !!current.approved;
     current = updated;
     await cacheMember(updated);
-    if (permsChanged) window.dispatchEvent(new CustomEvent('auth-changed'));
+    const modulesChanged = await refreshModules(tok);
+    if (permsChanged || modulesChanged) window.dispatchEvent(new CustomEvent('auth-changed'));
+  }
+
+  // ---------- Ausgeblendete Kacheln ----------
+  const hiddenModules = () => readJson(LS_MODULES, []);
+  const isHidden = id => hiddenModules().includes(id);
+  const storeModules = list => {
+    const next = [...new Set(list)].sort();
+    const changed = JSON.stringify(next) !== JSON.stringify(hiddenModules());
+    localStorage.setItem(LS_MODULES, JSON.stringify(next));
+    return changed;
+  };
+  // true, wenn sich etwas geändert hat
+  async function refreshModules(tok) {
+    try {
+      const d = await FB.getDoc('config', 'modules', tok);
+      return storeModules(d?.hidden || []);
+    } catch (e) {
+      if (e.code === 'NETWORK') throw e;
+      console.warn('Kachel-Einstellung nicht lesbar (Firestore-Regeln veröffentlicht?):', e);
+      return false;
+    }
+  }
+  async function setHiddenModules(list) {
+    await FB.commit([{ coll: 'config', id: 'modules', data: { hidden: [...new Set(list)].sort(),
+      updatedAt: new Date().toISOString(), by: current?.uid || '' } }], await token());
+    storeModules(list);
   }
 
   // 'done' = es gibt schon einen Admin, 'open' = Erst-Einrichtung nötig, 'offline',
@@ -258,7 +304,7 @@ const Auth = (() => {
   const can = perm => !!current && (isAdmin(current) || (current.perms || []).includes(perm));
 
   return {
-    PERMS, MIN_PASSWORD, available, user: () => current, can, isAdmin, restore, logout, login, token,
+    PERMS, PERM_GROUPS, PERM_SHORT, MIN_PASSWORD, available, hiddenModules, isHidden, setHiddenModules, user: () => current, can, isAdmin, restore, logout, login, token,
     refreshMember, setupStatus, createFirstAdmin, register, isWaiting, listMembers, createMember, updateMember, deleteMember, resetPassword,
   };
 })();
