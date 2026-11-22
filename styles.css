@@ -224,6 +224,39 @@ label.check input { width: 20px; height: 20px; flex: none; }
 .section-title { font-size: 17px; margin: 20px 0 10px; }
 .perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 16px; }
 .perm-grid label.check { font-size: 15px; margin-top: 8px; }
+
+/* Rechte nach Bereichen gruppiert */
+.perm-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.perm-group { border: 1px solid var(--line); border-radius: 12px; padding: 4px 12px 12px; margin: 0; min-width: 0; background: var(--card); }
+.perm-group.basis { border-color: color-mix(in srgb, var(--primary) 40%, var(--line)); }
+.perm-group-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 0 2px; font-size: 15px; }
+.perm-group-head .emoji { font-size: 18px; }
+.perm-group-head .grow { flex: 1; }
+.perm-group-head .tag { margin-left: 2px; }
+.perm-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.perm-group .link-btn.perm-all { padding: 0 0 0 6px; font-size: 14px; }
+.perm-group label.check { font-size: 15px; margin-top: 8px; }
+.perm-admin-note { display: none; grid-column: 1 / -1; font-size: 14px; margin: 0; }
+.perm-groups.is-admin .perm-admin-note { display: block; }
+.perm-groups.is-admin .perm-group:not(.basis) { opacity: .5; }
+
+/* Kacheln ein-/ausblenden */
+.module-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.module-toggle { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 12px; cursor: pointer; color: var(--text); margin: 0; position: relative; }
+.module-toggle input { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; margin: 0; left: 0; top: 0; }
+.module-toggle .emoji { font-size: 24px; }
+.module-toggle .grow { flex: 1; min-width: 0; }
+.module-toggle strong { display: block; font-size: 15px; }
+.module-toggle small { display: block; font-size: 13px; color: var(--muted); }
+.module-toggle.off .emoji, .module-toggle.off strong { opacity: .45; }
+.module-toggle:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.switch { width: 40px; height: 24px; border-radius: 99px; background: var(--line); position: relative; flex: none; transition: background .15s; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .15s; }
+.module-toggle input:checked ~ .switch { background: var(--ok); }
+.module-toggle input:checked ~ .switch::after { transform: translateX(16px); }
+.module-toggle input:disabled ~ .switch { opacity: .5; }
 .user-card .bill-head { gap: 8px; }
 .user-card.locked { opacity: .55; }
 .tag {
