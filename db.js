@@ -7,7 +7,7 @@ const DB = (() => {
   const DB_NAME = 'vereinsorga';
   const STORE = 'records';
   const SYNC_TYPES = ['drinkEvent', 'person', 'drink', 'drinkEntry', 'payment', 'event', 'calCategory',
-    'bayParticipant', 'bayBooking', 'cocktail', 'waObject', 'waEntry'];
+    'bayParticipant', 'bayBooking', 'cocktail', 'waObject', 'waTask'];
   let dbPromise;
   let onChange = null;
 

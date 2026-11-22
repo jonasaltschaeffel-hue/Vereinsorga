@@ -34,8 +34,8 @@ const Auth = (() => {
       ['kalender_bearbeiten', 'Kalender bearbeiten', 'Kalender ✎'],
     ] },
     { id: 'winterarbeit', emoji: '❄️', name: 'Winterarbeit', perms: [
-      ['winterarbeit', 'Arbeiten eintragen & unterschreiben', 'Winterarbeit'],
-      ['winterarbeit_verwalten', 'Objekte verwalten & Arbeiten abzeichnen', 'Winterarbeit ✎'],
+      ['winterarbeit', 'Aufgaben abhaken & unterschreiben', 'Winterarbeit'],
+      ['winterarbeit_verwalten', 'Aufgaben & Objekte anlegen, prüfen', 'Winterarbeit ✎'],
     ] },
   ];
   const PERMS = PERM_GROUPS.flatMap(g => g.perms.map(([k, l]) => [k, l]));

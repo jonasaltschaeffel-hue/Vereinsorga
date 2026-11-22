@@ -13,7 +13,7 @@ const MODULES = [
   { id: 'bayairn', href: '#/bayairn', emoji: '✈️', name: 'BayAirn', desc: 'Teilnehmer, Anmeldung & Konten', perms: ['bayairn'], hideable: true },
   { id: 'cocktails', href: '#/cocktails', emoji: '🍹', name: 'Cocktails', desc: 'Rezepte & Getränkekarte', perms: ['cocktails', 'cocktails_bearbeiten'], hideable: true },
   { id: 'kalender', href: '#/kalender', emoji: '📅', name: 'Kalender', desc: 'Termine & Veranstaltungen', perms: ['kalender', 'kalender_bearbeiten'], hideable: true },
-  { id: 'winterarbeit', href: '#/winterarbeit', emoji: '❄️', name: 'Winterarbeit', desc: 'Flugzeuge, Fahrzeuge & Infrastruktur', perms: ['winterarbeit', 'winterarbeit_verwalten'], hideable: true },
+  { id: 'winterarbeit', href: '#/winterarbeit', emoji: '❄️', name: 'Winterarbeit', desc: 'Aufgaben für Flugzeuge, Fahrzeuge & Infrastruktur', perms: ['winterarbeit', 'winterarbeit_verwalten'], hideable: true },
   { id: 'admin', href: '#/admin', emoji: '🔑', name: 'Admin', desc: 'Benutzer & Rechte', perms: ['admin'] },
   { id: 'einstellungen', href: '#/einstellungen', emoji: '⚙️', name: 'Einstellungen', desc: 'Gerät, Sicherung, Import', perms: ['einstellungen'] },
   { id: 'weitere', href: '', emoji: '➕', name: 'Weitere Module', desc: 'folgen', disabled: true, hideable: true },
@@ -1927,6 +1927,8 @@ async function route(opts = {}) {
     // Seiten mit Parameter, z. B. #/cocktails/<id>
     const r = ROUTES[path] || (path.startsWith('cocktails/')
       ? { render: () => renderCocktailDetail(decodeURIComponent(path.slice(10))), perms: ['cocktails', 'cocktails_bearbeiten'], module: 'cocktails' }
+      : path.startsWith('winterarbeit/')
+      ? { render: () => renderWaObject(decodeURIComponent(path.slice(13))), perms: ['winterarbeit', 'winterarbeit_verwalten'], module: 'winterarbeit' }
       : ROUTES['']);
     if (!canAny(r.perms)) {
       toast('Dafür fehlt dir die Berechtigung');

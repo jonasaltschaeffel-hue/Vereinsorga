@@ -1,92 +1,118 @@
-// Winterarbeit: Arbeiten an Flugzeugen, Fahrzeugen und Infrastruktur dokumentieren.
-// Wer gearbeitet hat, unterschreibt den Eintrag direkt auf dem Gerät (Finger, Stift oder Maus).
-// Ein Werkstattleiter / Verantwortlicher kann den Eintrag zusätzlich abzeichnen.
-// Rechte: „winterarbeit“ (ansehen, eigene Arbeiten eintragen & unterschreiben),
-//         „winterarbeit_verwalten“ (Objekte verwalten, abzeichnen, alle Einträge bearbeiten).
+// Winterarbeit: Aufgabenlisten für Flugzeuge, Fahrzeuge und Infrastruktur.
+// Verantwortliche schreiben Aufgaben auf, die erledigt werden müssen. Wer eine Aufgabe erledigt hat,
+// hakt sie ab: Name, Stunden, Bemerkung und Unterschrift direkt auf dem Gerät.
+// Ein Verantwortlicher kann erledigte Aufgaben anschließend prüfen (abzeichnen).
+// Rechte: „winterarbeit“ (ansehen, Aufgaben abhaken & unterschreiben),
+//         „winterarbeit_verwalten“ (Objekte & Aufgaben anlegen, prüfen, alles bearbeiten).
 //
 // waObject {name, kind: 'flugzeug'|'fahrzeug'|'infrastruktur', ident, note, archived}
-// waEntry  {objectId, objectName, objectKind, season, date, worker, hours, work, material,
-//           signature (PNG-Data-URL), signedAt, uid,
+// waTask   {objectId, objectName, objectKind, season, title, details, important, order,
+//           status: 'offen'|'erledigt', workers, hours (je Person), doneNote, signature, doneAt, doneUid,
 //           approvedBy, approvedSig, approvedAt}
-// Eine Änderung am Eintrag braucht eine neue Unterschrift und hebt die Abzeichnung auf.
 
 const WA_KINDS = {
-  flugzeug: { emoji: '✈️', name: 'Flugzeuge', one: 'Flugzeug', ph: 'z. B. ASK 21', identPh: 'z. B. D-1234' },
-  fahrzeug: { emoji: '🚜', name: 'Fahrzeuge', one: 'Fahrzeug', ph: 'z. B. Winde, Lepo, Traktor', identPh: 'z. B. R-LS 123' },
-  infrastruktur: { emoji: '🏠', name: 'Infrastruktur', one: 'Infrastruktur', ph: 'z. B. Halle, Werkstatt, Vereinsheim', identPh: '' },
+  flugzeug: { emoji: '✈️', name: 'Flugzeuge', one: 'Flugzeug', ph: 'z. B. ASK 21', identPh: 'z. B. D-1234',
+    ideas: ['Jahresnachprüfung vorbereiten', 'Rumpf und Flächen reinigen & polieren', 'Haube reinigen & polieren', 'Ruderanschlüsse prüfen & schmieren',
+      'Reifen und Bremse prüfen', 'Batterien prüfen & laden', 'Instrumente und Funk prüfen', 'Anhänger prüfen'] },
+  fahrzeug: { emoji: '🚜', name: 'Fahrzeuge', one: 'Fahrzeug', ph: 'z. B. Winde, Lepo, Traktor', identPh: 'z. B. R-LS 123',
+    ideas: ['Ölwechsel', 'Reifen und Luftdruck prüfen', 'Batterie prüfen', 'Seil prüfen / spleißen', 'Frostschutz prüfen', 'Fahrzeug reinigen', 'TÜV-Termin vereinbaren'] },
+  infrastruktur: { emoji: '🏠', name: 'Infrastruktur', one: 'Infrastruktur', ph: 'z. B. Halle, Werkstatt, Vereinsheim', identPh: '',
+    ideas: ['Halle aufräumen', 'Werkstatt aufräumen', 'Vereinsheim putzen', 'Heizung prüfen', 'Rasenmäher warten', 'Platzmarkierungen erneuern'] },
 };
-const waState = { season: '', view: 'objekt', kind: 'all' };
+const WA_ORDER = Object.keys(WA_KINDS);
+const waState = { season: '', kind: 'all', tab: 'objekte', filter: 'offen' };
 const canManageWa = () => Auth.can('winterarbeit_verwalten');
+const canTickWa = () => canManageWa() || Auth.can('winterarbeit');
 const waHours = n => (Math.round((n || 0) * 100) / 100).toLocaleString('de-DE', { maximumFractionDigits: 2 });
-const waDate = d => d ? new Date(d + 'T12:00').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+const waDay = iso => iso ? new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 const waToday = () => dayKey(new Date().toISOString());
 // Winter-Saison: Juli bis Juni, z. B. „2026/27“
 const waSeasonOf = d => {
-  const [y, m] = String(d || waToday()).split('-').map(Number);
+  const [y, m] = String(d || waToday()).slice(0, 10).split('-').map(Number);
   const start = m >= 7 ? y : y - 1;
   return `${start}/${String(start + 1).slice(2)}`;
 };
-const waObjLabel = o => `${o.name}${o.ident ? ` (${o.ident})` : ''}`;
-// eigener, noch nicht abgezeichneter Eintrag – oder Verwalter
-const waCanEdit = e => canManageWa() || (Auth.can('winterarbeit') && e.uid === Auth.user()?.uid && !e.approvedAt);
+const waObjLabel = o => `${o.name}${o.ident ? ` · ${o.ident}` : ''}`;
+const waWorkers = t => String(t.workers || '').split(/\s*(?:,|;|\bund\b|&|\+)\s*/i).map(s => s.trim()).filter(Boolean);
+const waTaskHours = t => (t.hours || 0) * Math.max(1, waWorkers(t).length);
+// Helfer dürfen eigene Häkchen zurücknehmen, solange die Aufgabe nicht geprüft ist
+const waCanUntick = t => canManageWa() || (Auth.can('winterarbeit') && t.doneUid === Auth.user()?.uid && !t.approvedAt);
 
 async function loadWa() {
-  const [objects, entries] = await Promise.all([DB.all('waObject'), DB.all('waEntry')]);
-  objects.sort((a, b) => Object.keys(WA_KINDS).indexOf(a.kind) - Object.keys(WA_KINDS).indexOf(b.kind) || a.name.localeCompare(b.name, 'de'));
-  entries.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-  return { objects, entries };
+  const [objects, tasks] = await Promise.all([DB.all('waObject'), DB.all('waTask')]);
+  objects.sort((a, b) => WA_ORDER.indexOf(a.kind) - WA_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name, 'de'));
+  tasks.sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0) || (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || '').localeCompare(b.createdAt || ''));
+  return { objects, tasks };
 }
+
+// Aufgaben der gewählten Saison – in der aktuellen Saison auch noch offene aus früheren Saisons
+function waSeasonTasks(tasks) {
+  const cur = waSeasonOf();
+  return tasks.filter(t => t.season === waState.season || (waState.season === cur && t.status !== 'erledigt' && t.season < cur));
+}
+function waSeasons(tasks) {
+  const list = [...new Set([waSeasonOf(), ...tasks.map(t => t.season)])].filter(Boolean).sort().reverse();
+  if (!waState.season || !list.includes(waState.season)) waState.season = waSeasonOf();
+  return list;
+}
+
+const waProgress = (done, total) => `
+  <div class="wa-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">
+    <span style="width:${total ? Math.round(done / total * 100) : 0}%"></span>
+  </div>`;
 
 // ---------- Übersicht ----------
 async function renderWinterarbeit() {
   setTitle('Winterarbeit', '#/');
-  const { objects, entries } = await loadWa();
+  const { objects, tasks } = await loadWa();
   const manage = canManageWa();
-  const canWrite = manage || Auth.can('winterarbeit');
-  const seasons = [...new Set([waSeasonOf(), ...entries.map(e => e.season)])].filter(Boolean).sort().reverse();
-  if (!waState.season || !seasons.includes(waState.season)) waState.season = waSeasonOf();
-  if (waState.view === 'objekte' && !manage) waState.view = 'objekt';
+  const seasons = waSeasons(tasks);
+  if (waState.tab === 'verwalten' && !manage) waState.tab = 'objekte';
 
   view.innerHTML = `
-    <div class="card">
-      <div class="card-head">
-        <h2>❄️ Winterarbeit</h2>
-        <select id="waSeason" class="filter" aria-label="Saison">${seasons.map(s =>
-          `<option value="${s}" ${s === waState.season ? 'selected' : ''}>Saison ${s}</option>`).join('')}</select>
+    <section class="wa-hero">
+      <div class="wa-hero-top">
+        <div class="grow">
+          <div class="wa-hero-kicker">❄️ Winterarbeit</div>
+          <h2 id="waHeroTitle"></h2>
+        </div>
+        <select id="waSeason" aria-label="Saison">${seasons.map(s => `<option value="${s}" ${s === waState.season ? 'selected' : ''}>Saison ${s}</option>`).join('')}</select>
       </div>
-      <div class="action-row">
-        ${canWrite ? '<button class="btn primary" id="waNew">＋ Arbeit eintragen</button>' : ''}
-        <button class="btn" id="waPrint">🖨 Nachweis drucken</button>
+      <div id="waHeroStats"></div>
+      <div class="wa-hero-actions">
+        <button class="btn" id="waPrint">🖨 Aufgabenliste drucken</button>
         <button class="btn" id="waCsv">⬇ Excel</button>
       </div>
-      <div class="wa-stats" id="waStats"></div>
-    </div>
+    </section>
     <nav class="tabs" id="waTabs">
-      ${[['objekt', 'Nach Objekt'], ['person', 'Nach Person'], ...(manage ? [['objekte', '⚙️ Objekte verwalten']] : [])].map(([k, l]) =>
-        `<a href="#/winterarbeit" data-v="${k}" class="${waState.view === k ? 'active' : ''}">${l}</a>`).join('')}
+      ${[['objekte', '📋 Aufgaben'], ['helfer', '👥 Helfer'], ...(manage ? [['verwalten', '⚙️ Objekte verwalten']] : [])].map(([k, l]) =>
+        `<a href="#/winterarbeit" data-v="${k}" class="${waState.tab === k ? 'active' : ''}">${l}</a>`).join('')}
     </nav>
     <div id="waBody"></div>`;
 
-  const seasonEntries = () => entries.filter(e => e.season === waState.season);
-  const kindOk = k => waState.kind === 'all' || waState.kind === k;
-
   const draw = () => {
-    const list = seasonEntries();
-    const shown = list.filter(e => kindOk(e.objectKind));
-    const open = shown.filter(e => !e.approvedAt).length;
-    document.getElementById('waStats').innerHTML = `
-      <span><strong>${waHours(shown.reduce((s, e) => s + (e.hours || 0), 0))}</strong> Stunden</span>
-      <span><strong>${shown.length}</strong> ${shown.length === 1 ? 'Eintrag' : 'Einträge'}</span>
-      <span><strong>${new Set(shown.map(e => norm(e.worker))).size}</strong> Helfer</span>
-      <span class="${open ? 'wa-open' : ''}"><strong>${open}</strong> nicht abgezeichnet</span>`;
-    const body = document.getElementById('waBody');
-    const kindChips = `<div class="chips" id="waKind" style="margin:0 0 12px">
+    const all = waSeasonTasks(tasks);
+    const shown = all.filter(t => waState.kind === 'all' || t.objectKind === waState.kind);
+    const done = shown.filter(t => t.status === 'erledigt');
+    const toCheck = done.filter(t => !t.approvedAt).length;
+    document.getElementById('waHeroTitle').textContent = shown.length
+      ? (done.length === shown.length ? 'Alles erledigt – super! 🎉' : `${shown.length - done.length} ${shown.length - done.length === 1 ? 'Aufgabe' : 'Aufgaben'} offen`)
+      : 'Noch keine Aufgaben';
+    document.getElementById('waHeroStats').innerHTML = `
+      ${waProgress(done.length, shown.length)}
+      <div class="wa-hero-stats">
+        <span><strong>${done.length}</strong> von ${shown.length} erledigt</span>
+        <span><strong>${waHours(done.reduce((s, t) => s + waTaskHours(t), 0))}</strong> Stunden</span>
+        <span><strong>${new Set(done.flatMap(t => waWorkers(t).map(norm))).size}</strong> Helfer</span>
+        ${manage ? `<span class="${toCheck ? 'wa-attn' : ''}"><strong>${toCheck}</strong> zu prüfen</span>` : ''}
+      </div>`;
+    const kindChips = `<div class="chips wa-kinds" id="waKind">
       ${[['all', 'Alle'], ...Object.entries(WA_KINDS).map(([k, v]) => [k, `${v.emoji} ${v.name}`])].map(([k, l]) =>
         `<button class="chip ${waState.kind === k ? 'active' : ''}" data-k="${k}">${l}</button>`).join('')}</div>`;
-
-    if (waState.view === 'objekte') body.innerHTML = objectsHtml(objects, entries);
-    else if (waState.view === 'person') body.innerHTML = kindChips + personHtml(shown);
-    else body.innerHTML = kindChips + objectViewHtml(objects, shown);
+    const body = document.getElementById('waBody');
+    if (waState.tab === 'verwalten') body.innerHTML = waManageHtml(objects, tasks);
+    else if (waState.tab === 'helfer') body.innerHTML = kindChips + waHelperHtml(done);
+    else body.innerHTML = kindChips + waObjectGridHtml(objects, shown);
 
     body.querySelector('#waKind')?.addEventListener('click', ev => {
       const c = ev.target.closest('.chip');
@@ -94,16 +120,10 @@ async function renderWinterarbeit() {
       waState.kind = c.dataset.k;
       draw();
     });
-    body.querySelectorAll('[data-entry]').forEach(li => li.addEventListener('click', () =>
-      openWaEntry(entries.find(e => e.id === li.dataset.entry), objects)));
-    body.querySelectorAll('[data-obj]').forEach(b => b.addEventListener('click', () =>
-      openWaObjectForm(objects.find(o => o.id === b.dataset.obj), entries)));
-    body.querySelectorAll('[data-newobj]').forEach(b => b.addEventListener('click', () =>
-      openWaObjectForm(null, entries, b.dataset.newobj)));
-    body.querySelectorAll('[data-addfor]').forEach(b => b.addEventListener('click', ev => {
-      ev.stopPropagation();
-      openWaEntryForm(null, objects, b.dataset.addfor);
-    }));
+    body.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => { location.hash = '#/winterarbeit/' + el.dataset.open; }));
+    body.querySelectorAll('[data-obj]').forEach(el => el.addEventListener('click', () => openWaObjectForm(objects.find(o => o.id === el.dataset.obj), tasks)));
+    body.querySelectorAll('[data-newobj]').forEach(el => el.addEventListener('click', () => openWaObjectForm(null, tasks, el.dataset.newobj)));
+    body.querySelectorAll('[data-task]').forEach(el => el.addEventListener('click', () => openWaTask(tasks.find(t => t.id === el.dataset.task))));
   };
 
   document.getElementById('waSeason').addEventListener('change', ev => { waState.season = ev.target.value; draw(); });
@@ -111,128 +131,413 @@ async function renderWinterarbeit() {
     const a = ev.target.closest('a[data-v]');
     if (!a) return;
     ev.preventDefault();
-    waState.view = a.dataset.v;
+    waState.tab = a.dataset.v;
     document.querySelectorAll('#waTabs a').forEach(x => x.classList.toggle('active', x === a));
     draw();
   });
-  document.getElementById('waNew')?.addEventListener('click', () => openWaEntryForm(null, objects));
+  const current = () => waSeasonTasks(tasks).filter(t => waState.kind === 'all' || t.objectKind === waState.kind);
   document.getElementById('waPrint').addEventListener('click', () => {
-    const list = seasonEntries().filter(e => kindOk(e.objectKind));
-    if (!list.length) return toast('Keine Einträge zum Drucken');
-    printWa(list, waState.view === 'person' ? 'person' : 'objekt');
+    const list = current();
+    if (!list.length) return toast('Keine Aufgaben zum Drucken');
+    printWa(list, objects, waState.kind !== 'all' ? WA_KINDS[waState.kind].name : '');
   });
   document.getElementById('waCsv').addEventListener('click', () => {
-    const list = seasonEntries().filter(e => kindOk(e.objectKind)).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    if (!list.length) return toast('Keine Einträge vorhanden');
-    downloadCsv(`winterarbeit_${waState.season.replace('/', '-')}.csv`,
-      ['Datum', 'Bereich', 'Objekt', 'Name', 'Stunden', 'Ausgeführte Arbeiten', 'Material', 'Unterschrieben am', 'Abgezeichnet von', 'Abgezeichnet am'],
-      list.map(e => [e.date ? new Date(e.date + 'T12:00').toLocaleDateString('de-DE') : '', WA_KINDS[e.objectKind]?.one || '', e.objectName,
-        e.worker, e.hours || 0, e.work, e.material || '', e.signedAt ? new Date(e.signedAt).toLocaleString('de-DE') : '',
-        e.approvedBy || '', e.approvedAt ? new Date(e.approvedAt).toLocaleString('de-DE') : '']));
+    const list = current();
+    if (!list.length) return toast('Keine Aufgaben vorhanden');
+    waCsv(list);
   });
   draw();
 }
 
-const waEntryLi = (e, showObj) => `
-  <li class="wa-entry" data-entry="${e.id}" role="button" tabindex="0">
-    <span class="grow">
-      <strong>${esc(e.worker)}</strong> <span class="muted">· ${waDate(e.date)}${showObj ? ` · ${WA_KINDS[e.objectKind]?.emoji || ''} ${esc(e.objectName)}` : ''}</span>
-      <span class="wa-work">${esc(e.work)}</span>
-      <span class="wa-tags">${e.signature ? '<span class="tag">✍️ unterschrieben</span>' : '<span class="tag warn">ohne Unterschrift</span>'}
-        ${e.approvedAt ? `<span class="tag ok">✔ abgezeichnet · ${esc(e.approvedBy)}</span>` : ''}</span>
-    </span>
-    <span class="num">${waHours(e.hours)} h</span>
-  </li>`;
-
-function objectViewHtml(objects, shown) {
-  const groups = new Map();
-  for (const e of shown) {
-    const g = groups.get(e.objectId) || { id: e.objectId, name: e.objectName, kind: e.objectKind, list: [] };
-    g.list.push(e);
-    groups.set(e.objectId, g);
-  }
-  // Objekte ohne Einträge (aktiv) ebenfalls zeigen, damit man direkt eintragen kann
-  const canWrite = canManageWa() || Auth.can('winterarbeit');
-  for (const o of objects) if (!o.archived && !groups.has(o.id) && (waState.kind === 'all' || waState.kind === o.kind))
-    groups.set(o.id, { id: o.id, name: o.name, kind: o.kind, list: [] });
-  const order = Object.keys(WA_KINDS);
-  const list = [...groups.values()].map(g => {
-    const o = objects.find(x => x.id === g.id);
-    return { ...g, label: o ? waObjLabel(o) : g.name, kind: o?.kind || g.kind };
-  }).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || (b.list.length > 0) - (a.list.length > 0) || a.label.localeCompare(b.label, 'de'));
-  if (!list.length) return `<div class="card"><p class="muted" style="margin:0">${objects.length ? 'Für diese Auswahl gibt es noch keine Einträge.'
-    : canManageWa() ? 'Noch keine Objekte angelegt. Lege unter „⚙️ Objekte verwalten“ Flugzeuge, Fahrzeuge und Infrastruktur an.'
-    : 'Noch keine Objekte angelegt. Ein Verantwortlicher für die Winterarbeit muss sie erst anlegen.'}</p></div>`;
-  return list.map(g => `
-    <div class="card">
-      <div class="card-head">
-        <h2>${WA_KINDS[g.kind]?.emoji || '🔧'} ${esc(g.label)}</h2>
-        <span class="muted">${waHours(g.list.reduce((s, e) => s + (e.hours || 0), 0))} h</span>
-        ${canWrite && objects.some(o => o.id === g.id && !o.archived) ? `<button class="btn small" data-addfor="${g.id}" aria-label="Arbeit an ${esc(g.label)} eintragen">＋</button>` : ''}
-      </div>
-      ${g.list.length ? `<ul class="list">${g.list.map(e => waEntryLi(e, false)).join('')}</ul>` : '<p class="muted" style="margin:0">Noch keine Arbeiten eingetragen.</p>'}
-    </div>`).join('');
+function waObjectGridHtml(objects, shown) {
+  const manage = canManageWa();
+  const list = objects.filter(o => (waState.kind === 'all' || o.kind === waState.kind) && (!o.archived || shown.some(t => t.objectId === o.id)));
+  if (!list.length) return `<div class="wa-empty">
+      <div class="wa-empty-icon">🛠️</div>
+      <strong>${objects.length ? 'Hier gibt es nichts.' : 'Noch keine Flugzeuge, Fahrzeuge oder Infrastruktur angelegt'}</strong>
+      <p class="muted">${manage ? 'Lege unter „⚙️ Objekte verwalten“ an, woran im Winter gearbeitet wird – danach kannst du Aufgaben dazuschreiben.'
+        : 'Ein Verantwortlicher für die Winterarbeit muss sie erst anlegen.'}</p>
+      ${manage && !objects.length ? '<button class="btn primary" data-newobj="flugzeug">＋ Erstes Objekt anlegen</button>' : ''}
+    </div>`;
+  const recent = shown.filter(t => t.status === 'erledigt').sort((a, b) => (b.doneAt || '').localeCompare(a.doneAt || '')).slice(0, 5);
+  return `<div class="wa-grid">${list.map(o => {
+      const ts = shown.filter(t => t.objectId === o.id);
+      const done = ts.filter(t => t.status === 'erledigt').length;
+      const open = ts.length - done;
+      const important = ts.filter(t => t.status !== 'erledigt' && t.important).length;
+      return `<button class="wa-obj-card kind-${o.kind}" data-open="${o.id}">
+        <span class="wa-obj-icon">${WA_KINDS[o.kind]?.emoji || '🔧'}</span>
+        <span class="wa-obj-name"><strong>${esc(o.name)}</strong>${o.ident ? `<small>${esc(o.ident)}</small>` : ''}</span>
+        ${waProgress(done, ts.length)}
+        <span class="wa-obj-foot">
+          ${ts.length ? (open ? `<span><b>${open}</b> offen</span>` : '<span class="wa-alldone">✔ alles erledigt</span>') : '<span class="muted">keine Aufgaben</span>'}
+          ${done && open ? `<span class="muted">${done} erledigt</span>` : ''}
+          ${important ? `<span class="wa-imp-badge">❗ ${important} wichtig</span>` : ''}
+          ${o.archived ? '<span class="tag">archiviert</span>' : ''}
+        </span>
+      </button>`;
+    }).join('')}</div>
+    ${recent.length ? `<div class="card wa-recent">
+      <h2>Zuletzt erledigt</h2>
+      <ul class="list">${recent.map(t => `<li data-task="${t.id}" role="button" tabindex="0">
+        <span class="wa-check-done">✓</span>
+        <span class="grow"><strong>${esc(t.title)}</strong>
+          <small class="muted">${WA_KINDS[t.objectKind]?.emoji || ''} ${esc(t.objectName)} · ${esc(t.workers)} · ${waDay(t.doneAt)}</small></span>
+        ${t.approvedAt ? '<span class="tag ok">geprüft</span>' : ''}
+      </li>`).join('')}</ul>
+    </div>` : ''}`;
 }
 
-function personHtml(shown) {
+function waHelperHtml(done) {
   const people = new Map();
-  for (const e of shown) {
-    const k = norm(e.worker);
-    const p = people.get(k) || { name: e.worker, hours: 0, list: [] };
-    p.hours += e.hours || 0;
-    p.list.push(e);
-    people.set(k, p);
+  for (const t of done) for (const w of waWorkers(t)) {
+    const p = people.get(norm(w)) || { name: w, hours: 0, n: 0 };
+    p.hours += t.hours || 0;
+    p.n++;
+    people.set(norm(w), p);
   }
   const list = [...people.values()].sort((a, b) => b.hours - a.hours || a.name.localeCompare(b.name, 'de'));
-  if (!list.length) return '<div class="card"><p class="muted" style="margin:0">Für diese Auswahl gibt es noch keine Einträge.</p></div>';
+  if (!list.length) return '<div class="wa-empty"><div class="wa-empty-icon">👥</div><strong>Noch keine erledigten Aufgaben</strong><p class="muted">Sobald Aufgaben abgehakt werden, erscheinen hier die Helfer und ihre Stunden.</p></div>';
+  const max = Math.max(...list.map(p => p.hours), 1);
   return `<div class="card">
-      <h2>Stunden pro Person</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Name</th><th class="num">Einträge</th><th class="num">Stunden</th></tr></thead>
-        <tbody>${list.map(p => `<tr><td>${esc(p.name)}</td><td class="num">${p.list.length}</td><td class="num"><strong>${waHours(p.hours)}</strong></td></tr>`).join('')}</tbody>
-      </table></div>
-    </div>
-    ${list.map(p => `<div class="card">
-      <div class="card-head"><h2>👤 ${esc(p.name)}</h2><span class="muted">${waHours(p.hours)} h</span></div>
-      <ul class="list">${p.list.map(e => waEntryLi(e, true)).join('')}</ul>
-    </div>`).join('')}`;
+    <h2>Stunden pro Helfer</h2>
+    <ul class="list wa-helpers">${list.map((p, i) => `<li>
+      <span class="avatar">${esc(p.name.slice(0, 1).toUpperCase())}</span>
+      <span class="grow"><strong>${esc(p.name)}</strong>${i === 0 && list.length > 1 ? ' 🏆' : ''}
+        <span class="wa-bar"><span style="width:${Math.round(p.hours / max * 100)}%"></span></span>
+        <small class="muted">${p.n} ${p.n === 1 ? 'Aufgabe' : 'Aufgaben'}</small></span>
+      <span class="num">${waHours(p.hours)} h</span></li>`).join('')}</ul>
+  </div>`;
 }
 
-function objectsHtml(objects, entries) {
+function waManageHtml(objects, tasks) {
   return Object.entries(WA_KINDS).map(([k, v]) => {
     const list = objects.filter(o => o.kind === k);
     return `<div class="card">
       <div class="card-head"><h2>${v.emoji} ${v.name}</h2><button class="btn small" data-newobj="${k}">＋ ${v.one}</button></div>
       ${list.length ? `<ul class="list">${list.map(o => {
-        const n = entries.filter(e => e.objectId === o.id).length;
-        return `<li class="wa-obj ${o.archived ? 'archived' : ''}" data-obj="${o.id}" role="button" tabindex="0">
+        const n = tasks.filter(t => t.objectId === o.id).length;
+        return `<li class="wa-row ${o.archived ? 'archived' : ''}" data-obj="${o.id}" role="button" tabindex="0">
           <span class="grow"><strong>${esc(o.name)}</strong>${o.ident ? ` <span class="muted">· ${esc(o.ident)}</span>` : ''}
             ${o.archived ? ' <span class="tag">archiviert</span>' : ''}
-            ${o.note ? `<span class="wa-work">${esc(o.note)}</span>` : ''}</span>
-          <span class="muted">${n} ${n === 1 ? 'Eintrag' : 'Einträge'}</span></li>`;
+            ${o.note ? `<small class="muted" style="display:block">${esc(o.note)}</small>` : ''}</span>
+          <span class="muted">${n} ${n === 1 ? 'Aufgabe' : 'Aufgaben'}</span><span class="muted">✎</span></li>`;
       }).join('')}</ul>` : '<p class="muted" style="margin:0">Noch nichts angelegt.</p>'}
     </div>`;
   }).join('');
 }
 
+// ---------- Seite eines Objekts: Aufgabenliste ----------
+async function renderWaObject(id) {
+  setTitle('Winterarbeit', '#/winterarbeit');
+  const { objects, tasks } = await loadWa();
+  waSeasons(tasks);
+  const o = objects.find(x => x.id === id);
+  if (!o) {
+    view.innerHTML = '<div class="card"><p>Dieses Objekt gibt es nicht mehr.</p><a class="btn" href="#/winterarbeit">Zur Übersicht</a></div>';
+    return;
+  }
+  const manage = canManageWa();
+  const k = WA_KINDS[o.kind] || WA_KINDS.flugzeug;
+  const mine = waSeasonTasks(tasks).filter(t => t.objectId === o.id);
+  const open = mine.filter(t => t.status !== 'erledigt');
+  const done = mine.filter(t => t.status === 'erledigt').sort((a, b) => (b.doneAt || '').localeCompare(a.doneAt || ''));
+  const ideas = k.ideas.filter(i => !mine.some(t => norm(t.title) === norm(i)));
+
+  view.innerHTML = `
+    <section class="wa-obj-head kind-${o.kind}">
+      <span class="wa-obj-icon big">${k.emoji}</span>
+      <div class="grow">
+        <div class="wa-hero-kicker">${k.one} · Saison ${esc(waState.season)}</div>
+        <h2>${esc(o.name)}${o.ident ? ` <small>${esc(o.ident)}</small>` : ''}</h2>
+        ${o.note ? `<p class="muted" style="margin:2px 0 0">${esc(o.note)}</p>` : ''}
+      </div>
+      <button class="btn small" id="waPrintObj">🖨 Drucken</button>
+    </section>
+    <div class="wa-obj-progress">
+      ${waProgress(done.length, mine.length)}
+      <span class="muted">${done.length} von ${mine.length} erledigt · ${waHours(done.reduce((s, t) => s + waTaskHours(t), 0))} Std.</span>
+    </div>
+    ${manage && !o.archived ? `
+      <form class="wa-add" id="waAdd">
+        <input id="waAddTitle" placeholder="Neue Aufgabe für ${esc(o.name)} …" maxlength="120" autocomplete="off">
+        <label class="wa-imp-toggle" title="Als wichtig markieren"><input type="checkbox" id="waAddImp">❗ wichtig</label>
+        <button class="btn primary" type="submit">Hinzufügen</button>
+      </form>
+      <div class="wa-add-more"><button class="btn small" id="waAddMany" type="button">📋 Mehrere auf einmal</button></div>
+      ${ideas.length && mine.length < 3 ? `<div class="wa-ideas"><span class="muted">Vorschläge:</span>
+        ${ideas.map(i => `<button class="chip" data-idea="${esc(i)}">＋ ${esc(i)}</button>`).join('')}</div>` : ''}` : ''}
+    <div class="card wa-tasks">
+      <h2>Offen <span class="wa-count">${open.length}</span></h2>
+      ${open.length ? `<ul class="wa-list">${open.map(t => waTaskLi(t, o)).join('')}</ul>`
+        : `<p class="wa-none">${mine.length ? '🎉 Alles erledigt!' : manage ? 'Noch keine Aufgaben – oben eintragen.' : 'Noch keine Aufgaben eingetragen.'}</p>`}
+    </div>
+    ${done.length ? `<div class="card wa-tasks">
+      <h2>Erledigt <span class="wa-count ok">${done.length}</span></h2>
+      <ul class="wa-list">${done.map(t => waTaskLi(t, o)).join('')}</ul>
+    </div>` : ''}`;
+
+  const addTask = async (title, important) => {
+    const max = tasks.filter(t => t.objectId === o.id).reduce((m, t) => Math.max(m, t.order ?? 0), 0);
+    await DB.save('waTask', waNewTask(o, title, important, max + 1));
+  };
+  document.getElementById('waAdd')?.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const title = document.getElementById('waAddTitle').value.trim();
+    if (!title) return;
+    await addTask(title, document.getElementById('waAddImp').checked);
+    toast('Aufgabe hinzugefügt');
+    await renderWaObject(id);
+    document.getElementById('waAddTitle')?.focus();
+  });
+  document.getElementById('waAddMany')?.addEventListener('click', () => openWaManyTasks(o, tasks));
+  view.querySelectorAll('[data-idea]').forEach(b => b.addEventListener('click', async () => {
+    await addTask(b.dataset.idea, false);
+    toast('Aufgabe hinzugefügt');
+    renderWaObject(id);
+  }));
+  view.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const t = tasks.find(x => x.id === b.dataset.check);
+    if (t.status === 'erledigt') openWaTask(t);
+    else if (canTickWa()) openWaTick(t);
+    else toast('Dafür fehlt dir die Berechtigung');
+  }));
+  view.querySelectorAll('.wa-task').forEach(li => li.addEventListener('click', () => openWaTask(tasks.find(x => x.id === li.dataset.id))));
+  document.getElementById('waPrintObj').addEventListener('click', () => {
+    if (!mine.length) return toast('Keine Aufgaben zum Drucken');
+    printWa(mine, objects, '');
+  });
+}
+
+const waNewTask = (o, title, important, order) => ({
+  objectId: o.id, objectName: o.name, objectKind: o.kind, season: waSeasonOf(), title, details: '', important: !!important, order,
+  status: 'offen', workers: '', hours: 0, doneNote: '', signature: '', doneAt: '', doneUid: '', approvedBy: '', approvedSig: '', approvedAt: '' });
+
+function waTaskLi(t) {
+  const done = t.status === 'erledigt';
+  return `<li class="wa-task ${done ? 'done' : ''} ${t.important && !done ? 'important' : ''}" data-id="${t.id}" role="button" tabindex="0">
+    <button class="wa-check" data-check="${t.id}" aria-label="${done ? 'Erledigt – Details' : 'Als erledigt abhaken'}">${done ? '✓' : ''}</button>
+    <span class="grow">
+      <span class="wa-task-title">${esc(t.title)}${t.important && !done ? ' <span class="wa-imp">wichtig</span>' : ''}${t.season !== waState.season ? ` <span class="tag">aus ${esc(t.season)}</span>` : ''}</span>
+      ${t.details ? `<span class="wa-task-details">${esc(t.details)}</span>` : ''}
+      ${done ? `<span class="wa-task-meta">✔ ${esc(t.workers)} · ${waDay(t.doneAt)}${t.hours ? ` · ${waHours(t.hours)} h${waWorkers(t).length > 1 ? ' je Person' : ''}` : ''}
+        ${t.approvedAt ? `<span class="tag ok">geprüft · ${esc(t.approvedBy)}</span>` : canManageWa() ? '<span class="tag new">zu prüfen</span>' : ''}</span>
+        ${t.doneNote ? `<span class="wa-task-details">„${esc(t.doneNote)}“</span>` : ''}` : ''}
+    </span>
+    ${done && t.signature ? `<img class="wa-sig-thumb" src="${t.signature}" alt="Unterschrift">` : ''}
+  </li>`;
+}
+
+// mehrere Aufgaben, eine pro Zeile
+function openWaManyTasks(o, tasks) {
+  const modal = openModal(`
+    <div class="modal-head"><div class="grow"><h2>Mehrere Aufgaben</h2><div class="muted">${esc(o.name)} · eine Aufgabe pro Zeile</div></div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
+    <form id="waManyForm" class="ev-form">
+      <textarea id="waMany" rows="8" placeholder="${esc(WA_KINDS[o.kind].ideas.slice(0, 3).join('\n'))}"></textarea>
+      <p class="muted" style="margin:0">Ein „!“ am Anfang markiert eine Aufgabe als wichtig.</p>
+      <div class="modal-actions"><span class="grow"></span>
+        <button class="btn" type="button" data-close>Abbrechen</button>
+        <button class="btn primary" type="submit">Hinzufügen</button></div>
+    </form>`);
+  modal.querySelector('#waMany').focus();
+  modal.querySelector('#waManyForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const lines = modal.querySelector('#waMany').value.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!lines.length) return closeModal();
+    let order = tasks.filter(t => t.objectId === o.id).reduce((m, t) => Math.max(m, t.order ?? 0), 0);
+    for (const l of lines) {
+      const imp = l.startsWith('!');
+      await DB.save('waTask', waNewTask(o, l.replace(/^!+\s*/, '').slice(0, 120), imp, ++order));
+    }
+    closeModal();
+    toast(`${lines.length} ${lines.length === 1 ? 'Aufgabe' : 'Aufgaben'} hinzugefügt`);
+    renderWaObject(o.id);
+  });
+}
+
+// ---------- Abhaken ----------
+function openWaTick(t) {
+  const modal = openModal(`
+    <div class="modal-head"><div class="grow"><h2>✓ Aufgabe abhaken</h2>
+      <div class="muted">${WA_KINDS[t.objectKind]?.emoji || ''} ${esc(t.objectName)}</div></div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
+    <div class="wa-tick-title">${esc(t.title)}</div>
+    ${t.details ? `<p class="muted" style="margin:4px 0 0">${esc(t.details)}</p>` : ''}
+    <form id="waTickForm" class="ev-form">
+      <div class="row">
+        <div><label for="wtWorkers">Erledigt von</label>
+          <input id="wtWorkers" required maxlength="120" value="${esc(Auth.user()?.name || '')}" autocomplete="off"></div>
+        <div class="shrink" style="width:130px"><label for="wtHours">Stunden</label>
+          <input id="wtHours" inputmode="decimal" placeholder="z. B. 2,5"></div>
+      </div>
+      <p class="muted" style="margin:4px 0 0;font-size:13px">Mehrere Helfer mit Komma trennen – die Stunden gelten dann je Person.</p>
+      <label for="wtNote">Bemerkung (optional)</label>
+      <input id="wtNote" maxlength="300" placeholder="z. B. Lager getauscht, Rest beim nächsten Mal">
+      ${sigBox('wtSig', 'Unterschrift')}
+      <p class="form-error" hidden></p>
+      <div class="modal-actions"><span class="grow"></span>
+        <button class="btn" type="button" data-close>Abbrechen</button>
+        <button class="btn primary wa-done-btn" type="submit">✓ Erledigt &amp; unterschreiben</button></div>
+    </form>`);
+  modal.classList.add('wa-modal');
+  const $ = id => modal.querySelector('#' + id);
+  const pad = signaturePad($('wtSig'));
+  modal.querySelector('[data-sigclear]').addEventListener('click', () => pad.clear());
+  $('waTickForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const err = msg => { const x = modal.querySelector('.form-error'); x.textContent = msg; x.hidden = !msg; };
+    const workers = $('wtWorkers').value.trim();
+    const raw = $('wtHours').value.trim();
+    const hours = raw ? parseFloat(raw.replace(',', '.')) : 0;
+    if (!workers) return err('Bitte eintragen, wer die Aufgabe erledigt hat.');
+    if (raw && !(hours > 0 && hours <= 24)) return err('Bitte gültige Stunden eingeben (z. B. 2,5).');
+    if (pad.isEmpty()) return err('Bitte unterschreiben.');
+    await DB.save('waTask', { ...t, status: 'erledigt', workers, hours: Math.round(hours * 100) / 100, doneNote: $('wtNote').value.trim(),
+      signature: pad.toDataUrl(), doneAt: new Date().toISOString(), doneUid: Auth.user()?.uid || '' });
+    closeModal();
+    toast('✓ Erledigt – danke!');
+    route({ keepScroll: true });
+  });
+}
+
+// ---------- Aufgabe ansehen / bearbeiten / prüfen ----------
+function openWaTask(t) {
+  if (!t) return;
+  const manage = canManageWa();
+  const done = t.status === 'erledigt';
+  if (!done && manage) return openWaTaskForm(t);
+  if (!done) return canTickWa() ? openWaTick(t) : undefined;
+  const modal = openModal(`
+    <div class="modal-head"><div class="grow"><h2>${esc(t.title)}</h2>
+      <div class="muted">${WA_KINDS[t.objectKind]?.emoji || ''} ${esc(t.objectName)} · Saison ${esc(t.season)}</div></div>
+      <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
+    ${t.details ? `<p style="margin:6px 0 0">${esc(t.details)}</p>` : ''}
+    <dl class="wa-detail">
+      <dt>Erledigt von</dt><dd>${esc(t.workers)}</dd>
+      <dt>Am</dt><dd>${new Date(t.doneAt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</dd>
+      ${t.hours ? `<dt>Stunden</dt><dd>${waHours(t.hours)} h${waWorkers(t).length > 1 ? ` je Person (${waHours(waTaskHours(t))} h gesamt)` : ''}</dd>` : ''}
+      ${t.doneNote ? `<dt>Bemerkung</dt><dd>${esc(t.doneNote)}</dd>` : ''}
+    </dl>
+    <div class="wa-sigs">
+      <div class="wa-sig">
+        <div class="sig-img">${t.signature ? `<img src="${t.signature}" alt="Unterschrift">` : ''}</div>
+        <small>Unterschrift ${esc(t.workers)}</small>
+      </div>
+      <div class="wa-sig">
+        <div class="sig-img">${t.approvedSig ? `<img src="${t.approvedSig}" alt="Prüfung">` : '<span class="muted">noch nicht geprüft</span>'}</div>
+        <small>${t.approvedAt ? `Geprüft: ${esc(t.approvedBy)} · ${waDay(t.approvedAt)}` : 'Prüfung (Verantwortlicher)'}</small>
+      </div>
+    </div>
+    <div id="waApprove" hidden>${sigBox('waApSig', `Prüfen als ${esc(Auth.user()?.name || '')}`)}<p class="form-error" hidden></p></div>
+    <div class="modal-actions">
+      ${waCanUntick(t) ? '<button class="btn" id="waReopen">↺ Wieder öffnen</button>' : ''}
+      ${manage ? '<button class="btn" id="waEditTask">✎ Aufgabe bearbeiten</button>' : ''}
+      <span class="grow"></span>
+      ${manage && t.approvedAt ? '<button class="btn" id="waUnapprove">Prüfung aufheben</button>' : ''}
+      ${manage && !t.approvedAt ? '<button class="btn primary" id="waApproveBtn">✔ Prüfen</button>' : ''}
+    </div>`);
+  modal.classList.add('wa-modal');
+  const $ = id => modal.querySelector('#' + id);
+  $('waEditTask')?.addEventListener('click', () => openWaTaskForm(t));
+  $('waReopen')?.addEventListener('click', async () => {
+    if (!confirm('Aufgabe wieder als offen markieren? Name, Stunden und Unterschrift werden entfernt.')) return;
+    await DB.save('waTask', { ...t, status: 'offen', workers: '', hours: 0, doneNote: '', signature: '', doneAt: '', doneUid: '',
+      approvedBy: '', approvedSig: '', approvedAt: '' });
+    closeModal();
+    toast('Aufgabe ist wieder offen');
+    route({ keepScroll: true });
+  });
+  $('waUnapprove')?.addEventListener('click', async () => {
+    await DB.save('waTask', { ...t, approvedBy: '', approvedSig: '', approvedAt: '' });
+    closeModal();
+    toast('Prüfung aufgehoben');
+    route({ keepScroll: true });
+  });
+  let pad = null;
+  $('waApproveBtn')?.addEventListener('click', async ev => {
+    if (!pad) {
+      $('waApprove').hidden = false;
+      pad = signaturePad($('waApSig'));
+      $('waApprove').querySelector('[data-sigclear]').addEventListener('click', () => pad.clear());
+      ev.currentTarget.textContent = '✔ Unterschreiben & prüfen';
+      $('waApSig').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
+    if (pad.isEmpty()) { const x = $('waApprove').querySelector('.form-error'); x.textContent = 'Bitte unterschreiben.'; x.hidden = false; return; }
+    await DB.save('waTask', { ...t, approvedBy: Auth.user()?.name || '', approvedSig: pad.toDataUrl(), approvedAt: new Date().toISOString() });
+    closeModal();
+    toast('Geprüft');
+    route({ keepScroll: true });
+  });
+}
+
+function openWaTaskForm(t) {
+  DB.all('waObject').then(objects => {
+    objects = objects.filter(o => !o.archived || o.id === t.objectId);
+    const modal = openModal(`
+      <div class="modal-head"><div class="grow"><h2>Aufgabe bearbeiten</h2></div>
+        <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
+      <form id="waTaskForm" class="ev-form">
+        <label for="wfTitle">Aufgabe</label>
+        <input id="wfTitle" required maxlength="120" value="${esc(t.title)}">
+        <label for="wfDetails">Genauere Beschreibung (optional)</label>
+        <textarea id="wfDetails" rows="3" maxlength="1000" placeholder="z. B. Werkzeug liegt im Schrank links">${esc(t.details || '')}</textarea>
+        <label for="wfObj">Objekt</label>
+        <select id="wfObj">${objects.map(o => `<option value="${o.id}" ${o.id === t.objectId ? 'selected' : ''}>${WA_KINDS[o.kind]?.emoji || ''} ${esc(waObjLabel(o))}</option>`).join('')}</select>
+        <label class="check" style="margin-top:12px"><input type="checkbox" id="wfImp" ${t.important ? 'checked' : ''}> ❗ wichtig (steht oben)</label>
+        ${t.status !== 'erledigt' && canTickWa() ? '<button type="button" class="btn wa-done-btn" id="wfTick" style="margin-top:14px;width:100%">✓ Jetzt abhaken</button>' : ''}
+        <p class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button class="btn danger" type="button" id="wfDel">Löschen</button>
+          <span class="grow"></span>
+          <button class="btn" type="button" data-close>Abbrechen</button>
+          <button class="btn primary" type="submit">Speichern</button></div>
+      </form>`);
+    modal.classList.add('wa-modal');
+    const $ = id => modal.querySelector('#' + id);
+    $('wfTick')?.addEventListener('click', () => openWaTick(t));
+    $('wfDel').addEventListener('click', async () => {
+      if (!confirm(`Aufgabe „${t.title}“ löschen?`)) return;
+      await DB.remove(t);
+      closeModal();
+      toast('Aufgabe gelöscht');
+      route({ keepScroll: true });
+    });
+    $('waTaskForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const title = $('wfTitle').value.trim();
+      if (!title) { const x = modal.querySelector('.form-error'); x.textContent = 'Bitte die Aufgabe eintragen.'; x.hidden = false; return; }
+      const o = objects.find(x => x.id === $('wfObj').value);
+      await DB.save('waTask', { ...t, title, details: $('wfDetails').value.trim(), important: $('wfImp').checked,
+        objectId: o.id, objectName: o.name, objectKind: o.kind });
+      closeModal();
+      toast('Gespeichert');
+      route({ keepScroll: true });
+    });
+  });
+}
+
 // ---------- Objekt anlegen / bearbeiten ----------
-function openWaObjectForm(o, entries, kind) {
+function openWaObjectForm(o, tasks, kind) {
   const isNew = !o;
   const d = o || { name: '', kind: kind || 'flugzeug', ident: '', note: '', archived: false };
-  const used = o ? entries.filter(e => e.objectId === o.id).length : 0;
+  const used = o ? tasks.filter(t => t.objectId === o.id).length : 0;
   const modal = openModal(`
     <div class="modal-head"><div class="grow"><h2>${isNew ? 'Neues Objekt' : 'Objekt bearbeiten'}</h2></div>
       <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
     <form id="waObjForm" class="ev-form">
-      <label for="woKind">Bereich</label>
-      <select id="woKind">${Object.entries(WA_KINDS).map(([k, v]) => `<option value="${k}" ${k === d.kind ? 'selected' : ''}>${v.emoji} ${v.one}</option>`).join('')}</select>
+      <label>Bereich</label>
+      <div class="wa-kind-pick">${Object.entries(WA_KINDS).map(([k, v]) => `
+        <label class="kind-${k}"><input type="radio" name="woKind" value="${k}" ${k === d.kind ? 'checked' : ''}><span>${v.emoji}<b>${v.one}</b></span></label>`).join('')}</div>
       <label for="woName">Bezeichnung</label>
       <input id="woName" required maxlength="60" value="${esc(d.name)}">
       <label for="woIdent">Kennzeichen / Nummer (optional)</label>
       <input id="woIdent" maxlength="30" value="${esc(d.ident || '')}">
       <label for="woNote">Notiz (optional)</label>
       <input id="woNote" maxlength="120" value="${esc(d.note || '')}" placeholder="z. B. Jahresnachprüfung im Februar">
-      ${isNew ? '' : `<label class="check" style="margin-top:12px"><input type="checkbox" id="woArchived" ${d.archived ? 'checked' : ''}> archiviert (erscheint nicht mehr bei neuen Einträgen)</label>`}
+      ${isNew ? '' : `<label class="check" style="margin-top:12px"><input type="checkbox" id="woArchived" ${d.archived ? 'checked' : ''}> archiviert (wird in der Übersicht nicht mehr gezeigt)</label>`}
       <p class="form-error" hidden></p>
       <div class="modal-actions">
         ${!isNew && !used ? '<button class="btn danger" type="button" id="woDel">Löschen</button>' : ''}
@@ -240,10 +545,12 @@ function openWaObjectForm(o, entries, kind) {
         <button class="btn" type="button" data-close>Abbrechen</button>
         <button class="btn primary" type="submit">${isNew ? 'Anlegen' : 'Speichern'}</button></div>
     </form>`);
+  modal.classList.add('wa-modal');
   const $ = id => modal.querySelector('#' + id);
-  const setPh = () => { const k = WA_KINDS[$('woKind').value]; $('woName').placeholder = k.ph; $('woIdent').placeholder = k.identPh; };
+  const kindNow = () => modal.querySelector('input[name="woKind"]:checked').value;
+  const setPh = () => { const k = WA_KINDS[kindNow()]; $('woName').placeholder = k.ph; $('woIdent').placeholder = k.identPh; };
   setPh();
-  $('woKind').addEventListener('change', setPh);
+  modal.querySelectorAll('input[name="woKind"]').forEach(r => r.addEventListener('change', setPh));
   $('woName').focus();
   $('woDel')?.addEventListener('click', async () => {
     if (!confirm(`„${d.name}“ löschen?`)) return;
@@ -256,20 +563,20 @@ function openWaObjectForm(o, entries, kind) {
     ev.preventDefault();
     const name = $('woName').value.trim();
     if (!name) { const e = modal.querySelector('.form-error'); e.textContent = 'Bitte eine Bezeichnung eingeben.'; e.hidden = false; return; }
-    const rec = await DB.save('waObject', { ...(o || {}), name, kind: $('woKind').value, ident: $('woIdent').value.trim(),
+    const rec = await DB.save('waObject', { ...(o || {}), name, kind: kindNow(), ident: $('woIdent').value.trim(),
       note: $('woNote').value.trim(), archived: $('woArchived')?.checked || false });
-    // Name in bestehenden Einträgen mitziehen, damit Liste und Druck stimmen
+    // Name in den Aufgaben mitziehen, damit Listen und Druck stimmen
     if (o && (o.name !== rec.name || o.kind !== rec.kind)) {
-      for (const e of entries.filter(x => x.objectId === o.id)) await DB.save('waEntry', { ...e, objectName: rec.name, objectKind: rec.kind });
+      for (const t of tasks.filter(x => x.objectId === o.id)) await DB.save('waTask', { ...t, objectName: rec.name, objectKind: rec.kind });
     }
     closeModal();
     toast(isNew ? `${name} angelegt` : 'Gespeichert');
-    renderWinterarbeit();
+    if (isNew) location.hash = '#/winterarbeit/' + rec.id; else renderWinterarbeit();
   });
 }
 
 // ---------- Unterschriftenfeld ----------
-// Zeichnet mit Finger, Stift oder Maus. Ergebnis: verkleinertes PNG (transparenter Hintergrund).
+// Zeichnet mit Finger, Stift oder Maus. Ergebnis: zugeschnittenes, verkleinertes PNG.
 function signaturePad(canvas) {
   const ctx = canvas.getContext('2d');
   let drawing = false, empty = true, last = null;
@@ -279,9 +586,8 @@ function signaturePad(canvas) {
     canvas.width = Math.round(r.width * dpr);
     canvas.height = Math.round(r.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#10213a';
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#10213a'; ctx.fillStyle = '#10213a';
     empty = true;
-    canvas.dispatchEvent(new Event('sigchange'));
   };
   const pos = ev => { const r = canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
   canvas.addEventListener('pointerdown', ev => {
@@ -289,14 +595,14 @@ function signaturePad(canvas) {
     canvas.setPointerCapture(ev.pointerId);
     drawing = true;
     last = pos(ev);
-    ctx.beginPath(); ctx.arc(last.x, last.y, 1.2, 0, Math.PI * 2); ctx.fillStyle = '#10213a'; ctx.fill();
+    ctx.beginPath(); ctx.arc(last.x, last.y, 1.2, 0, Math.PI * 2); ctx.fill();
   });
   canvas.addEventListener('pointermove', ev => {
     if (!drawing) return;
     const p = pos(ev);
     ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
     last = p;
-    if (empty) { empty = false; canvas.dispatchEvent(new Event('sigchange')); }
+    empty = false;
   });
   const end = () => { drawing = false; };
   canvas.addEventListener('pointerup', end);
@@ -305,7 +611,6 @@ function signaturePad(canvas) {
   return {
     isEmpty: () => empty,
     clear: fit,
-    // auf die gezeichnete Fläche zuschneiden und auf max. 360 px Breite verkleinern (spart Speicher)
     toDataUrl() {
       const { width: w, height: h } = canvas;
       const data = ctx.getImageData(0, 0, w, h).data;
@@ -334,192 +639,52 @@ const sigBox = (id, label) => `
     <div class="sig-line">✕ hier mit Finger, Stift oder Maus unterschreiben</div>
   </div>`;
 
-// ---------- Arbeit eintragen / bearbeiten ----------
-function openWaEntryForm(e, objects, objectId) {
-  const isNew = !e;
-  const active = objects.filter(o => !o.archived || o.id === e?.objectId);
-  if (!active.length) {
-    alert(canManageWa() ? 'Bitte zuerst unter „⚙️ Objekte verwalten“ ein Flugzeug, Fahrzeug oder eine Infrastruktur anlegen.'
-      : 'Es sind noch keine Objekte angelegt. Bitte einen Verantwortlichen für die Winterarbeit fragen.');
-    return;
-  }
-  const d = e || { objectId: objectId || (waState.lastObj && active.some(o => o.id === waState.lastObj) ? waState.lastObj : ''),
-    date: waToday(), worker: Auth.user()?.name || '', hours: '', work: '', material: '' };
-  const modal = openModal(`
-    <div class="modal-head"><div class="grow"><h2>${isNew ? 'Arbeit eintragen' : 'Eintrag bearbeiten'}</h2></div>
-      <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
-    <form id="waForm" class="ev-form">
-      <label for="weObj">Woran wurde gearbeitet?</label>
-      <select id="weObj" required>
-        <option value="">– bitte wählen –</option>
-        ${Object.entries(WA_KINDS).map(([k, v]) => {
-          const list = active.filter(o => o.kind === k);
-          return list.length ? `<optgroup label="${v.emoji} ${v.name}">${list.map(o =>
-            `<option value="${o.id}" ${o.id === d.objectId ? 'selected' : ''}>${esc(waObjLabel(o))}</option>`).join('')}</optgroup>` : '';
-        }).join('')}
-      </select>
-      <div class="row">
-        <div><label for="weDate">Datum</label><input id="weDate" type="date" required value="${esc(d.date)}"></div>
-        <div class="shrink" style="width:130px"><label for="weHours">Stunden</label>
-          <input id="weHours" inputmode="decimal" required placeholder="z. B. 3,5" value="${d.hours ? String(d.hours).replace('.', ',') : ''}"></div>
-      </div>
-      <label for="weWorker">Name</label>
-      <input id="weWorker" required maxlength="60" value="${esc(d.worker)}" autocomplete="off">
-      <label for="weWork">Ausgeführte Arbeiten</label>
-      <textarea id="weWork" rows="4" maxlength="2000" required placeholder="z. B. Haube poliert, Seitenruder-Lager geprüft und gefettet">${esc(d.work)}</textarea>
-      <label for="weMat">Material / Ersatzteile (optional)</label>
-      <input id="weMat" maxlength="200" value="${esc(d.material || '')}" placeholder="z. B. 1 l Hydrauliköl, 2 Reifen">
-      ${isNew ? '' : '<p class="muted" style="margin:12px 0 0">Nach einer Änderung muss der Eintrag neu unterschrieben werden.' +
-        (e.approvedAt ? ' Die Abzeichnung wird dabei aufgehoben.' : '') + '</p>'}
-      ${sigBox('weSig', 'Unterschrift')}
-      <p class="form-error" hidden></p>
-      <div class="modal-actions"><span class="grow"></span>
-        <button class="btn" type="button" data-close>Abbrechen</button>
-        <button class="btn primary" type="submit">✍️ Unterschreiben &amp; speichern</button></div>
-    </form>`);
-  modal.classList.add('wide', 'wa-modal');
-  const $ = id => modal.querySelector('#' + id);
-  const pad = signaturePad($('weSig'));
-  modal.querySelector('[data-sigclear]').addEventListener('click', () => pad.clear());
-  if (!d.objectId) $('weObj').focus();
-  $('waForm').addEventListener('submit', async ev => {
-    ev.preventDefault();
-    const err = msg => { const x = modal.querySelector('.form-error'); x.textContent = msg; x.hidden = !msg; };
-    const obj = objects.find(o => o.id === $('weObj').value);
-    const hours = parseFloat($('weHours').value.replace(',', '.'));
-    const worker = $('weWorker').value.trim();
-    const work = $('weWork').value.trim();
-    const date = $('weDate').value;
-    if (!obj) return err('Bitte auswählen, woran gearbeitet wurde.');
-    if (!date) return err('Bitte ein Datum eingeben.');
-    if (!(hours > 0) || hours > 24) return err('Bitte die Stunden eingeben (z. B. 3,5).');
-    if (!worker) return err('Bitte den Namen eingeben.');
-    if (!work) return err('Bitte beschreiben, was gemacht wurde.');
-    if (pad.isEmpty()) return err('Bitte unterschreiben.');
-    const now = new Date().toISOString();
-    waState.lastObj = obj.id;
-    await DB.save('waEntry', { ...(e || {}), objectId: obj.id, objectName: obj.name, objectKind: obj.kind,
-      season: waSeasonOf(date), date, hours: Math.round(hours * 100) / 100, worker, work, material: $('weMat').value.trim(),
-      signature: pad.toDataUrl(), signedAt: now, uid: e?.uid || Auth.user()?.uid || '',
-      approvedBy: '', approvedSig: '', approvedAt: '' });
-    waState.season = waSeasonOf(date);
-    closeModal();
-    toast(isNew ? 'Arbeit eingetragen und unterschrieben' : 'Eintrag gespeichert');
-    renderWinterarbeit();
-  });
+// ---------- Excel ----------
+function waCsv(list) {
+  downloadCsv(`winterarbeit_${waState.season.replace('/', '-')}.csv`,
+    ['Bereich', 'Objekt', 'Aufgabe', 'Beschreibung', 'Wichtig', 'Status', 'Erledigt von', 'Stunden je Person', 'Stunden gesamt', 'Erledigt am', 'Bemerkung', 'Geprüft von', 'Geprüft am'],
+    list.slice().sort((a, b) => WA_ORDER.indexOf(a.objectKind) - WA_ORDER.indexOf(b.objectKind) || a.objectName.localeCompare(b.objectName, 'de'))
+      .map(t => [WA_KINDS[t.objectKind]?.one || '', t.objectName, t.title, t.details || '', t.important ? 'ja' : '', t.status === 'erledigt' ? 'erledigt' : 'offen',
+        t.workers || '', t.hours || 0, waTaskHours(t), waDay(t.doneAt), t.doneNote || '', t.approvedBy || '', waDay(t.approvedAt)]));
 }
 
-// ---------- Eintrag ansehen, abzeichnen ----------
-function openWaEntry(e, objects) {
-  if (!e) return;
-  const obj = objects.find(o => o.id === e.objectId);
-  const modal = openModal(`
-    <div class="modal-head"><div class="grow"><h2>${WA_KINDS[e.objectKind]?.emoji || '🔧'} ${esc(obj ? waObjLabel(obj) : e.objectName)}</h2>
-      <div class="muted">${waDate(e.date)} · Saison ${esc(e.season)}</div></div>
-      <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
-    <dl class="wa-detail">
-      <dt>Name</dt><dd>${esc(e.worker)}</dd>
-      <dt>Stunden</dt><dd>${waHours(e.hours)} h</dd>
-      <dt>Ausgeführte Arbeiten</dt><dd class="wa-pre">${esc(e.work)}</dd>
-      ${e.material ? `<dt>Material / Ersatzteile</dt><dd>${esc(e.material)}</dd>` : ''}
-    </dl>
-    <div class="wa-sigs">
-      <div class="wa-sig">
-        <div class="sig-img">${e.signature ? `<img src="${e.signature}" alt="Unterschrift ${esc(e.worker)}">` : ''}</div>
-        <small>${esc(e.worker)}${e.signedAt ? ` · ${new Date(e.signedAt).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}` : ''}</small>
-      </div>
-      <div class="wa-sig">
-        <div class="sig-img">${e.approvedSig ? `<img src="${e.approvedSig}" alt="Abzeichnung ${esc(e.approvedBy)}">` : '<span class="muted">noch nicht abgezeichnet</span>'}</div>
-        <small>${e.approvedAt ? `Abgezeichnet: ${esc(e.approvedBy)} · ${new Date(e.approvedAt).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}` : 'Abzeichnung (Verantwortlicher)'}</small>
-      </div>
-    </div>
-    <div id="waApprove" hidden>
-      ${sigBox('waApSig', `Abzeichnen als ${esc(Auth.user()?.name || '')}`)}
-      <p class="form-error" hidden></p>
-    </div>
-    <p class="muted" style="font-size:13px;margin:12px 0 0">Erfasst von ${esc(e.by || '–')} auf ${esc(e.device || '–')}</p>
-    <div class="modal-actions">
-      ${waCanEdit(e) ? '<button class="btn danger" id="waDel">Löschen</button>' : ''}
-      <span class="grow"></span>
-      ${waCanEdit(e) ? '<button class="btn" id="waEdit">✎ Bearbeiten</button>' : ''}
-      ${canManageWa() && e.approvedAt ? '<button class="btn" id="waUnapprove">Abzeichnung aufheben</button>' : ''}
-      ${canManageWa() && !e.approvedAt ? '<button class="btn primary" id="waApproveBtn">✔ Abzeichnen</button>' : ''}
-    </div>`);
-  modal.classList.add('wide', 'wa-modal');
-  const $ = id => modal.querySelector('#' + id);
-  $('waEdit')?.addEventListener('click', () => openWaEntryForm(e, objects));
-  $('waDel')?.addEventListener('click', async () => {
-    if (!confirm(`Eintrag von ${e.worker} vom ${waDate(e.date)} löschen?`)) return;
-    await DB.remove(e);
-    closeModal();
-    toast('Eintrag gelöscht');
-    renderWinterarbeit();
-  });
-  $('waUnapprove')?.addEventListener('click', async () => {
-    if (!confirm('Abzeichnung aufheben?')) return;
-    await DB.save('waEntry', { ...e, approvedBy: '', approvedSig: '', approvedAt: '' });
-    closeModal();
-    toast('Abzeichnung aufgehoben');
-    renderWinterarbeit();
-  });
-  let pad = null;
-  $('waApproveBtn')?.addEventListener('click', async ev => {
-    if (!pad) {
-      $('waApprove').hidden = false;
-      pad = signaturePad($('waApSig'));
-      modal.querySelector('[data-sigclear]').addEventListener('click', () => pad.clear());
-      ev.currentTarget.textContent = '✔ Unterschreiben & abzeichnen';
-      $('waApSig').scrollIntoView({ block: 'center', behavior: 'smooth' });
-      return;
-    }
-    if (pad.isEmpty()) { const x = $('waApprove').querySelector('.form-error'); x.textContent = 'Bitte unterschreiben.'; x.hidden = false; return; }
-    await DB.save('waEntry', { ...e, approvedBy: Auth.user()?.name || '', approvedSig: pad.toDataUrl(), approvedAt: new Date().toISOString() });
-    closeModal();
-    toast('Eintrag abgezeichnet');
-    renderWinterarbeit();
-  });
-}
-
-// ---------- Druck: Arbeitsnachweis mit Unterschriften ----------
-function printWa(list, mode) {
+// ---------- Druck: Aufgabenliste mit Abhak-Kästchen und Unterschriften ----------
+function printWa(list, objects, subtitle) {
   let area = document.getElementById('printArea');
   if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
   const groups = new Map();
-  for (const e of list.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''))) {
-    const key = mode === 'person' ? norm(e.worker) : e.objectId;
-    const title = mode === 'person' ? `👤 ${e.worker}` : `${WA_KINDS[e.objectKind]?.one || ''}: ${e.objectName}`;
-    const g = groups.get(key) || { title, kind: e.objectKind, list: [] };
-    g.list.push(e);
-    groups.set(key, g);
+  for (const t of list) {
+    const g = groups.get(t.objectId) || { o: objects.find(o => o.id === t.objectId) || { name: t.objectName, kind: t.objectKind }, list: [] };
+    g.list.push(t);
+    groups.set(t.objectId, g);
   }
-  const order = Object.keys(WA_KINDS);
-  const sorted = [...groups.values()].sort((a, b) => mode === 'person' ? a.title.localeCompare(b.title, 'de')
-    : order.indexOf(a.kind) - order.indexOf(b.kind) || a.title.localeCompare(b.title, 'de'));
-  const sum = l => waHours(l.reduce((s, e) => s + (e.hours || 0), 0));
-  const fmt = iso => iso ? new Date(iso).toLocaleDateString('de-DE') : '';
+  const sorted = [...groups.values()].sort((a, b) => WA_ORDER.indexOf(a.o.kind) - WA_ORDER.indexOf(b.o.kind) || a.o.name.localeCompare(b.o.name, 'de'));
+  const done = list.filter(t => t.status === 'erledigt').length;
   area.innerHTML = `
     <div class="wa-print">
-      <h1>Winterarbeit – Arbeitsnachweis Saison ${esc(waState.season)}</h1>
-      <p>${list.length} Einträge · ${sum(list)} Stunden${waState.kind !== 'all' ? ` · nur ${WA_KINDS[waState.kind].name}` : ''}</p>
-      ${sorted.map(g => `
-        <h2>${esc(g.title)} <span>(${sum(g.list)} h)</span></h2>
+      <h1>Winterarbeit ${esc(waState.season)}${subtitle ? ` – ${esc(subtitle)}` : ''}</h1>
+      <p>${done} von ${list.length} Aufgaben erledigt · ${waHours(list.reduce((s, t) => s + (t.status === 'erledigt' ? waTaskHours(t) : 0), 0))} Stunden</p>
+      ${sorted.map(g => {
+        const items = g.list.slice().sort((a, b) => (a.status === 'erledigt') - (b.status === 'erledigt') || (b.important ? 1 : 0) - (a.important ? 1 : 0) || (a.order ?? 0) - (b.order ?? 0));
+        return `<h2>${WA_KINDS[g.o.kind]?.one || ''}: ${esc(waObjLabel(g.o))}</h2>
         <table>
-          <thead><tr><th>Datum</th>${mode === 'person' ? '<th>Objekt</th>' : '<th>Name</th>'}<th class="num">Std.</th><th>Ausgeführte Arbeiten</th><th>Unterschrift</th><th>Abgezeichnet</th></tr></thead>
-          <tbody>${g.list.map(e => `<tr>
-            <td>${e.date ? new Date(e.date + 'T12:00').toLocaleDateString('de-DE') : ''}</td>
-            <td>${esc(mode === 'person' ? e.objectName : e.worker)}</td>
-            <td class="num">${waHours(e.hours)}</td>
-            <td>${esc(e.work)}${e.material ? `<div class="small">Material: ${esc(e.material)}</div>` : ''}</td>
-            <td class="sig">${e.signature ? `<img src="${e.signature}" alt="">` : ''}<div class="small">${fmt(e.signedAt)}</div></td>
-            <td class="sig">${e.approvedSig ? `<img src="${e.approvedSig}" alt="">` : ''}<div class="small">${e.approvedAt ? `${esc(e.approvedBy)}, ${fmt(e.approvedAt)}` : ''}</div></td>
+          <thead><tr><th class="box"></th><th>Aufgabe</th><th>Erledigt von</th><th class="num">Std.</th><th>Datum</th><th>Unterschrift</th><th>Geprüft</th></tr></thead>
+          <tbody>${items.map(t => `<tr>
+            <td class="box">${t.status === 'erledigt' ? '☑' : '☐'}</td>
+            <td>${t.important ? '<b>❗</b> ' : ''}${esc(t.title)}${t.details ? `<div class="small">${esc(t.details)}</div>` : ''}${t.doneNote ? `<div class="small">Bemerkung: ${esc(t.doneNote)}</div>` : ''}</td>
+            <td>${esc(t.workers || '')}</td>
+            <td class="num">${t.hours ? waHours(t.hours) : ''}</td>
+            <td>${waDay(t.doneAt)}</td>
+            <td class="sig">${t.signature ? `<img src="${t.signature}" alt="">` : ''}</td>
+            <td class="sig">${t.approvedSig ? `<img src="${t.approvedSig}" alt="">` : ''}<div class="small">${t.approvedAt ? `${esc(t.approvedBy)}, ${waDay(t.approvedAt)}` : ''}</div></td>
           </tr>`).join('')}</tbody>
-        </table>`).join('')}
+        </table>`;
+      }).join('')}
       <p class="small">Erstellt am ${new Date().toLocaleDateString('de-DE')} mit Vereinsorga</p>
     </div>`;
   document.body.classList.add('printing-menu');
-  const done = () => { document.body.classList.remove('printing-menu'); area.innerHTML = ''; window.removeEventListener('afterprint', done); };
-  window.addEventListener('afterprint', done);
-  // Unterschriften-Bilder erst laden lassen
+  const done2 = () => { document.body.classList.remove('printing-menu'); area.innerHTML = ''; window.removeEventListener('afterprint', done2); };
+  window.addEventListener('afterprint', done2);
   Promise.all([...area.querySelectorAll('img')].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })))
     .then(() => setTimeout(() => window.print(), 50));
 }
