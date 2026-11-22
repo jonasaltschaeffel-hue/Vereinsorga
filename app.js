@@ -6,17 +6,20 @@ const titleEl = document.getElementById('title');
 const backBtn = document.getElementById('backBtn');
 
 // perms: Kachel ist sichtbar, wenn der Benutzer mindestens eines dieser Rechte hat.
+// hideable: Admin kann die Kachel für alle ausblenden (Admin/Einstellungen nie, sonst sperrt man sich aus).
 const DRINK_PERMS = ['ausgabe', 'einrichtung', 'abrechnung', 'statistik'];
 const MODULES = [
-  { href: '#/getraenke', emoji: '🥤', name: 'Getränkevergabe', desc: 'Personen, Getränke, Ausgabe, Abrechnung', perms: DRINK_PERMS },
-  { href: '#/bayairn', emoji: '✈️', name: 'BayAirn', desc: 'Teilnehmer, Anmeldung & Konten', perms: ['bayairn'] },
-  { href: '#/cocktails', emoji: '🍹', name: 'Cocktails', desc: 'Rezepte & Getränkekarte', perms: ['cocktails', 'cocktails_bearbeiten'] },
-  { href: '#/kalender', emoji: '📅', name: 'Kalender', desc: 'Termine & Veranstaltungen', perms: ['kalender', 'kalender_bearbeiten'] },
-  { href: '#/admin', emoji: '🔑', name: 'Admin', desc: 'Benutzer & Rechte', perms: ['admin'] },
-  { href: '#/einstellungen', emoji: '⚙️', name: 'Einstellungen', desc: 'Gerät, Sicherung, Import', perms: ['einstellungen'] },
-  { href: '', emoji: '➕', name: 'Weitere Module', desc: 'folgen', disabled: true },
+  { id: 'getraenke', href: '#/getraenke', emoji: '🥤', name: 'Getränkevergabe', desc: 'Personen, Getränke, Ausgabe, Abrechnung', perms: DRINK_PERMS, hideable: true },
+  { id: 'bayairn', href: '#/bayairn', emoji: '✈️', name: 'BayAirn', desc: 'Teilnehmer, Anmeldung & Konten', perms: ['bayairn'], hideable: true },
+  { id: 'cocktails', href: '#/cocktails', emoji: '🍹', name: 'Cocktails', desc: 'Rezepte & Getränkekarte', perms: ['cocktails', 'cocktails_bearbeiten'], hideable: true },
+  { id: 'kalender', href: '#/kalender', emoji: '📅', name: 'Kalender', desc: 'Termine & Veranstaltungen', perms: ['kalender', 'kalender_bearbeiten'], hideable: true },
+  { id: 'admin', href: '#/admin', emoji: '🔑', name: 'Admin', desc: 'Benutzer & Rechte', perms: ['admin'] },
+  { id: 'einstellungen', href: '#/einstellungen', emoji: '⚙️', name: 'Einstellungen', desc: 'Gerät, Sicherung, Import', perms: ['einstellungen'] },
+  { id: 'weitere', href: '', emoji: '➕', name: 'Weitere Module', desc: 'folgen', disabled: true, hideable: true },
 ];
 const canAny = perms => !perms || perms.some(p => Auth.can(p));
+const moduleVisible = m => !(m.hideable && Auth.isHidden(m.id));
+const moduleShown = m => canAny(m.perms) && moduleVisible(m);
 
 // ---------- Hilfsfunktionen ----------
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -74,7 +77,7 @@ function downloadCsv(filename, header, rows) {
 async function renderHome() {
   setTitle('Vereinsorga');
   // Widget „Nächste Termine“ für alle, die den Kalender sehen dürfen
-  const widget = Auth.can('kalender') || Auth.can('kalender_bearbeiten') ? await upcomingWidget() : null;
+  const widget = (Auth.can('kalender') || Auth.can('kalender_bearbeiten')) && !Auth.isHidden('kalender') ? await upcomingWidget() : null;
   view.innerHTML = `
     <p class="greeting">Hallo <strong>${esc(Auth.user().name)}</strong>!</p>
     ${Auth.isWaiting(Auth.user()) ? `
@@ -82,14 +85,14 @@ async function renderHome() {
         <h2>⏳ Dein Konto wartet auf Freigabe</h2>
         <p class="muted" style="margin:0">Ein Admin muss dir erst die Bereiche freigeben, die du nutzen darfst.
         Sobald das passiert ist, erscheinen sie hier automatisch (mit Internet nach spätestens 30 Sekunden).</p>
-      </div>` : !MODULES.some(m => m.perms && !m.perms.includes('einstellungen') && canAny(m.perms)) ? `
+      </div>` : !MODULES.some(m => m.perms && !m.perms.includes('einstellungen') && moduleShown(m)) ? `
       <div class="card">
         <h2>Keine Bereiche freigegeben</h2>
         <p class="muted" style="margin:0">Dir sind im Moment keine Bereiche freigegeben. Wende dich bei Bedarf an einen Admin.</p>
       </div>` : ''}
     ${widget && widget.position === 'above' ? widget.html : ''}
     <div class="tiles">
-      ${MODULES.filter(m => canAny(m.perms)).map(m => `
+      ${MODULES.filter(moduleShown).map(m => `
         <a class="tile ${m.disabled ? 'disabled' : ''}" href="${m.href}">
           <span class="emoji">${m.emoji}</span>
           <strong>${esc(m.name)}</strong>
@@ -1067,7 +1070,7 @@ async function renderEinstellungen() {
   setTitle('Einstellungen', '#/');
   const count = (await DB.allRecords()).filter(r => !r.deleted && DB.SYNC_TYPES.includes(r.type)).length;
   const theme = localStorage.getItem('theme') || 'auto';
-  const seesCalendar = Auth.can('kalender') || Auth.can('kalender_bearbeiten');
+  const seesCalendar = (Auth.can('kalender') || Auth.can('kalender_bearbeiten')) && !Auth.isHidden('kalender');
   const wp = seesCalendar ? widgetPrefs() : null;
   const cats = seesCalendar ? (await loadCalendar()).cats : [];
   const catChecked = id => !wp.cats || wp.cats.includes(id);
@@ -1429,8 +1432,56 @@ function renderForgot() {
 // (Kacheln nebeneinander, mit Suche und Filter). Ein Klick öffnet die Details.
 const adminState = { users: [], query: '', filter: 'all' };
 const isNewUser = u => Auth.isWaiting(u) && u.active !== false;
-const PERM_SHORT = { ausgabe: 'Ausgabe', einrichtung: 'Einrichtung', abrechnung: 'Abrechnung', statistik: 'Statistik',
-  kalender: 'Kalender', kalender_bearbeiten: 'Kalender ✎', einstellungen: 'Einstellungen', admin: 'Admin' };
+const PERM_SHORT = Auth.PERM_SHORT;
+
+// Rechte-Auswahl, nach Bereichen gruppiert (eine Karte je Bereich, mit „alle“-Schalter).
+// name: Name der Checkboxen. Bindung an Änderungen: bindPermEditor().
+function permEditor(name, selected) {
+  const sel = new Set(selected || []);
+  return `<div class="perm-groups ${sel.has('admin') ? 'is-admin' : ''}">${Auth.PERM_GROUPS.map(g => {
+    const n = g.perms.filter(([k]) => sel.has(k)).length;
+    return `
+    <fieldset class="perm-group ${g.id === 'basis' ? 'basis' : ''}" data-group="${g.id}">
+      <legend class="perm-group-head">
+        <span class="emoji">${g.emoji}</span>
+        <strong>${esc(g.name)}</strong>
+        ${Auth.isHidden(g.id) ? '<span class="tag" title="Kachel ist auf der Startseite ausgeblendet">ausgeblendet</span>' : ''}
+        <span class="grow"></span>
+        <span class="perm-count">${n}/${g.perms.length}</span>
+        ${g.perms.length > 1 && g.id !== 'basis' ? `<button type="button" class="link-btn perm-all">${n === g.perms.length ? 'keine' : 'alle'}</button>` : ''}
+      </legend>
+      ${g.perms.map(([k, l]) => `
+        <label class="check"><input type="checkbox" name="${name}" value="${k}" ${sel.has(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
+    </fieldset>`;
+  }).join('')}
+    <p class="muted perm-admin-note">Admins dürfen immer alles – die übrigen Häkchen spielen dann keine Rolle.</p>
+  </div>`;
+}
+
+// onChange(perms) wird nach jeder Änderung (auch „alle“/„keine“) einmal aufgerufen.
+function bindPermEditor(root, name, onChange) {
+  const wrap = root.querySelector('.perm-groups');
+  const boxes = () => [...wrap.querySelectorAll(`[name="${name}"]`)];
+  const refresh = () => {
+    wrap.querySelectorAll('.perm-group').forEach(g => {
+      const all = [...g.querySelectorAll('input')], n = all.filter(b => b.checked).length;
+      g.querySelector('.perm-count').textContent = `${n}/${all.length}`;
+      const btn = g.querySelector('.perm-all');
+      if (btn) btn.textContent = n === all.length ? 'keine' : 'alle';
+    });
+    wrap.classList.toggle('is-admin', boxes().some(b => b.value === 'admin' && b.checked));
+  };
+  const changed = () => { refresh(); onChange?.(boxes().filter(b => b.checked).map(b => b.value)); };
+  boxes().forEach(b => b.addEventListener('change', changed));
+  wrap.querySelectorAll('.perm-all').forEach(btn => btn.addEventListener('click', () => {
+    const all = [...btn.closest('.perm-group').querySelectorAll('input')];
+    const target = !all.every(b => b.checked);
+    all.forEach(b => { b.checked = target; });
+    changed();
+  }));
+  return { refresh, set: perms => { boxes().forEach(b => { b.checked = perms.includes(b.value); }); refresh(); },
+    disable: on => { boxes().forEach(b => { b.disabled = on; }); wrap.querySelectorAll('.perm-all').forEach(b => { b.disabled = on; }); } };
+}
 
 async function loadMembers() {
   adminState.users = await Auth.listMembers();
@@ -1471,6 +1522,20 @@ async function renderAdmin() {
       </div>
     </div>
     <div class="card">
+      <h2>Kacheln auf der Startseite</h2>
+      <p class="muted">Bereiche, die gerade nicht gebraucht werden, kannst du ausblenden. Das gilt für <strong>alle Benutzer</strong>
+      – die Rechte bleiben erhalten, und die Daten bleiben gespeichert. Admin und Einstellungen lassen sich nicht ausblenden.</p>
+      <div class="module-toggles">
+        ${MODULES.filter(m => m.hideable).map(m => `
+          <label class="module-toggle ${Auth.isHidden(m.id) ? 'off' : ''}">
+            <input type="checkbox" name="modVisible" value="${m.id}" ${Auth.isHidden(m.id) ? '' : 'checked'}>
+            <span class="emoji">${m.emoji}</span>
+            <span class="grow"><strong>${esc(m.name)}</strong><small>${Auth.isHidden(m.id) ? 'ausgeblendet' : 'sichtbar'}</small></span>
+            <span class="switch" aria-hidden="true"></span>
+          </label>`).join('')}
+      </div>
+    </div>
+    <div class="card">
       <h2>Gut zu wissen</h2>
       <p class="muted" style="margin:0">Benutzer und Rechte sind in Firebase gespeichert und gelten auf allen Geräten.
       Änderungen wirken beim nächsten Abgleich (online spätestens nach 30 Sekunden). Ein Gerät, das gerade offline ist,
@@ -1481,6 +1546,25 @@ async function renderAdmin() {
   document.getElementById('openNew')?.addEventListener('click', () => open('new'));
   document.getElementById('createUser').addEventListener('click', () => openCreateUser(false));
   view.querySelectorAll('.stat').forEach(b => b.addEventListener('click', () => open(b.dataset.filter)));
+
+  const modBoxes = [...view.querySelectorAll('[name="modVisible"]')];
+  modBoxes.forEach(box => box.addEventListener('change', async () => {
+    const hidden = modBoxes.filter(b => !b.checked).map(b => b.value);
+    modBoxes.forEach(b => { b.disabled = true; });
+    try {
+      await Auth.setHiddenModules(hidden);
+      const m = MODULES.find(x => x.id === box.value);
+      toast(`${m.name} ${box.checked ? 'eingeblendet' : 'ausgeblendet'}`);
+      const label = box.closest('.module-toggle');
+      label.classList.toggle('off', !box.checked);
+      label.querySelector('small').textContent = box.checked ? 'sichtbar' : 'ausgeblendet';
+    } catch (e) {
+      box.checked = !box.checked;
+      alert(e.status === 403 ? 'Speichern abgelehnt. Bitte die aktuellen Firestore-Regeln (firestore.rules) in der Firebase-Konsole veröffentlichen.'
+        : fbMessage(e));
+    }
+    modBoxes.forEach(b => { b.disabled = false; });
+  }));
 }
 
 // Fenster mit allen Benutzern als Kacheln
@@ -1554,8 +1638,7 @@ function openCreateUser(fromList) {
       </div>
       <p class="muted" style="font-size:14px;margin:8px 0 0">Gib der Person Name und Passwort weiter. Sie kann sich damit sofort anmelden.</p>
       <h3 class="sub-title">Rechte</h3>
-      <div class="perm-grid">${Auth.PERMS.map(([k, l]) => `
-        <label class="check"><input type="checkbox" name="cuPerm" value="${k}" ${k === 'einstellungen' ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      ${permEditor('cuPerm', ['einstellungen'])}
       <p class="form-error" hidden></p>
       <div class="modal-actions">
         <button class="btn" type="button" id="cuCancel">Abbrechen</button>
@@ -1570,6 +1653,7 @@ function openCreateUser(fromList) {
   const leave = () => fromList ? openUsersWindow() : (closeModal(), renderAdmin());
   modal.querySelector('#backToList')?.addEventListener('click', leave);
   modal.querySelector('#cuCancel').addEventListener('click', leave);
+  bindPermEditor(modal, 'cuPerm');
   modal.querySelector('#cuName').focus();
 
   modal.querySelector('#createForm').addEventListener('submit', async ev => {
@@ -1615,8 +1699,7 @@ function openUserDetail(u) {
       <button class="icon-btn" data-close aria-label="Schließen">✕</button>
     </div>
     <h3 class="sub-title">Rechte</h3>
-    <div class="perm-grid">${Auth.PERMS.map(([k, l]) => `
-      <label class="check"><input type="checkbox" name="perm" value="${k}" ${(u.perms || []).includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+    ${permEditor('perm', u.perms)}
     <p class="muted" style="font-size:14px;margin:8px 0 0">Häkchen werden sofort gespeichert.</p>
     <h3 class="sub-title">Aktionen</h3>
     <div class="action-row">
@@ -1647,23 +1730,23 @@ function openUserDetail(u) {
     }
   };
 
-  modal.querySelectorAll('[name="perm"]').forEach(box => box.addEventListener('change', async () => {
-    const perms = [...modal.querySelectorAll('[name="perm"]:checked')].map(c => c.value);
+  const prevPerms = [...(u.perms || [])];
+  const editor = bindPermEditor(modal, 'perm', async perms => {
     const losesAdmin = Auth.isAdmin(u) && !perms.includes('admin');
     if (losesAdmin && activeAdmins().length <= 1) {
-      box.checked = true;
+      editor.set(prevPerms);
       return alert('Es muss immer mindestens einen Admin geben.');
     }
     if (losesAdmin && u.uid === me.uid &&
       !confirm('Du nimmst dir selbst die Admin-Rechte. Danach kannst du diese Seite nicht mehr öffnen. Fortfahren?')) {
-      box.checked = true;
+      editor.set(prevPerms);
       return;
     }
-    modal.querySelectorAll('[name="perm"]').forEach(b => { b.disabled = true; });
+    editor.disable(true);
     const ok = await act(() => Auth.updateMember(u, { perms }), `Rechte von ${u.name} gespeichert`);
-    if (!ok) { modal.querySelectorAll('[name="perm"]').forEach(b => { b.disabled = false; }); box.checked = !box.checked; return; }
+    if (!ok) { editor.disable(false); editor.set(prevPerms); return; }
     if (u.uid === me.uid) { await Sync.run(); if (losesAdmin) { closeModal(); go('#/'); } }
-  }));
+  });
 
   modal.querySelector('[data-act="known"]')?.addEventListener('click', ev =>
     act(() => Auth.updateMember(u, { approved: true }), `${u.name} ist jetzt als bekannt markiert`, ev.currentTarget));
@@ -1694,15 +1777,15 @@ function openUserDetail(u) {
 // refresh: Variante für das automatische Neuladen nach einem Abgleich.
 const ROUTES = {
   '': { render: renderHome },
-  'getraenke': { render: renderGetraenkeStart, perms: DRINK_PERMS },
-  'getraenke/einrichtung': { render: renderEinrichtung, perms: ['einrichtung'] },
-  'getraenke/abrechnung': { render: () => renderAbrechnung(true), refresh: () => renderAbrechnung(false), perms: ['abrechnung'] },
-  'getraenke/bezahlt': { render: renderBezahlt, perms: ['abrechnung'] },
-  'getraenke/statistik': { render: renderStatistik, perms: ['statistik'] },
-  'ausgabe': { render: renderAusgabe, perms: ['ausgabe'] },
-  'kalender': { render: renderKalender, perms: ['kalender', 'kalender_bearbeiten'] },
-  'bayairn': { render: renderBayAirn, perms: ['bayairn'] },
-  'cocktails': { render: renderCocktails, perms: ['cocktails', 'cocktails_bearbeiten'] },
+  'getraenke': { render: renderGetraenkeStart, perms: DRINK_PERMS, module: 'getraenke' },
+  'getraenke/einrichtung': { render: renderEinrichtung, perms: ['einrichtung'], module: 'getraenke' },
+  'getraenke/abrechnung': { render: () => renderAbrechnung(true), refresh: () => renderAbrechnung(false), perms: ['abrechnung'], module: 'getraenke' },
+  'getraenke/bezahlt': { render: renderBezahlt, perms: ['abrechnung'], module: 'getraenke' },
+  'getraenke/statistik': { render: renderStatistik, perms: ['statistik'], module: 'getraenke' },
+  'ausgabe': { render: renderAusgabe, perms: ['ausgabe'], module: 'getraenke' },
+  'kalender': { render: renderKalender, perms: ['kalender', 'kalender_bearbeiten'], module: 'kalender' },
+  'bayairn': { render: renderBayAirn, perms: ['bayairn'], module: 'bayairn' },
+  'cocktails': { render: renderCocktails, perms: ['cocktails', 'cocktails_bearbeiten'], module: 'cocktails' },
   'einkauf': { render: renderEinkauf, perms: ['cocktails_bearbeiten', 'einrichtung'] },
   'einstellungen': { render: renderEinstellungen, perms: ['einstellungen'] },
   'admin': { render: renderAdmin, perms: ['admin'] },
@@ -1841,10 +1924,16 @@ async function route(opts = {}) {
     }
     // Seiten mit Parameter, z. B. #/cocktails/<id>
     const r = ROUTES[path] || (path.startsWith('cocktails/')
-      ? { render: () => renderCocktailDetail(decodeURIComponent(path.slice(10))), perms: ['cocktails', 'cocktails_bearbeiten'] }
+      ? { render: () => renderCocktailDetail(decodeURIComponent(path.slice(10))), perms: ['cocktails', 'cocktails_bearbeiten'], module: 'cocktails' }
       : ROUTES['']);
     if (!canAny(r.perms)) {
       toast('Dafür fehlt dir die Berechtigung');
+      location.replace('#/');
+      return;
+    }
+    if (r.module && Auth.isHidden(r.module)) {
+      toast(Auth.isAdmin(Auth.user()) ? 'Dieser Bereich ist ausgeblendet – unter Admin → Kacheln wieder einblenden'
+        : 'Dieser Bereich ist im Moment ausgeblendet');
       location.replace('#/');
       return;
     }
