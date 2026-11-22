@@ -637,6 +637,57 @@ body.kiosk-mode main { max-width: 1400px; padding-top: calc(12px + env(safe-area
   .card { border: 0; border-bottom: 1px solid #999; border-radius: 0; break-inside: avoid; }
 }
 
+/* ---------- Winterarbeit ---------- */
+.wa-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; color: var(--muted); font-size: 14px; }
+.wa-stats strong { color: var(--text); font-size: 17px; font-variant-numeric: tabular-nums; }
+.wa-stats .wa-open strong { color: #d68a00; }
+.wa-entry, .wa-obj { cursor: pointer; align-items: flex-start !important; }
+.wa-entry:hover, .wa-obj:hover { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.wa-entry .num { white-space: nowrap; padding-top: 2px; }
+.wa-work { display: block; font-size: 15px; margin-top: 2px; white-space: pre-line; overflow-wrap: anywhere; }
+.wa-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.wa-tags .tag { margin-left: 0; }
+.wa-obj.archived { opacity: .55; }
+.wa-modal { max-width: 640px !important; }
+.wa-modal .modal-actions { flex-wrap: wrap; }
+.wa-detail { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 10px 0 0; }
+.wa-detail dt { color: var(--muted); font-size: 14px; padding-top: 2px; }
+.wa-detail dd { margin: 0; overflow-wrap: anywhere; }
+.wa-pre { white-space: pre-line; }
+@media (max-width: 480px) { .wa-detail { grid-template-columns: 1fr; } .wa-detail dd { margin-bottom: 6px; } }
+.wa-sigs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+@media (max-width: 480px) { .wa-sigs { grid-template-columns: 1fr; } }
+.wa-sig small { display: block; color: var(--muted); font-size: 13px; margin-top: 4px; }
+/* Unterschriften immer auf hellem „Papier“, damit die dunkle Tinte auch im dunklen Modus lesbar ist */
+.sig-img {
+  height: 96px; display: flex; align-items: center; justify-content: center; padding: 6px;
+  background: #fbfaf6; border: 1px solid var(--line); border-radius: 10px;
+}
+.sig-img img { max-width: 100%; max-height: 100%; }
+.sig-img .muted { color: #8a8f96; }
+.sig-wrap { margin-top: 14px; }
+.sig-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.sig-head label { margin: 0; }
+.sig-pad {
+  display: block; width: 100%; height: 170px; touch-action: none; cursor: crosshair;
+  background: #fbfaf6; border: 1px solid var(--line); border-radius: 10px 10px 0 0;
+}
+.sig-line {
+  font-size: 12px; color: #6b7280; background: #fbfaf6; padding: 4px 10px 6px;
+  border: 1px solid var(--line); border-top: 1px dashed #9aa3ad; border-radius: 0 0 10px 10px;
+}
+.wa-print { font-family: Arial, sans-serif; color: #000; }
+.wa-print h1 { font-size: 20px; margin: 0 0 4px; }
+.wa-print h2 { font-size: 16px; margin: 18px 0 4px; break-after: avoid; }
+.wa-print h2 span { font-weight: 400; color: #444; }
+.wa-print table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.wa-print th, .wa-print td { border: 1px solid #999; padding: 4px 5px; text-align: left; vertical-align: top; }
+.wa-print tr { break-inside: avoid; }
+.wa-print .num { text-align: right; }
+.wa-print td.sig { width: 120px; }
+.wa-print td.sig img { max-width: 110px; max-height: 44px; display: block; }
+.wa-print .small { font-size: 10px; color: #555; }
+
 .toast {
   position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom));
   transform: translateX(-50%) translateY(120px);
