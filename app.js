@@ -1274,6 +1274,7 @@ const passwordProblem = (pw, pw2) =>
   pw.length < Auth.MIN_PASSWORD ? `Das Passwort braucht mindestens ${Auth.MIN_PASSWORD} Zeichen.`
   : pw2 !== undefined && pw !== pw2 ? 'Die beiden Passwörter stimmen nicht überein.' : '';
 const realNameProblem = s => s.trim().split(/\s+/).length < 2 ? 'Bitte Vor- und Nachnamen eingeben.' : '';
+const clubProblem = s => s.trim().length < 2 ? 'Bitte den Verein eingeben.' : '';
 
 // Verständliche Meldungen für Firebase-Fehler
 function fbMessage(e) {
@@ -1386,6 +1387,7 @@ function renderRegister() {
     <form id="regForm">
       <label for="rName">Benutzername (zum Anmelden)</label><input id="rName" autocomplete="username" maxlength="40" required>
       <label for="rReal">Vor- und Nachname</label><input id="rReal" autocomplete="name" maxlength="80" required placeholder="z. B. Max Mustermann">
+      <label for="rClub">Verein</label><input id="rClub" autocomplete="organization" maxlength="80" required placeholder="z. B. LSV Regensburg">
       ${pwField('rPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}
       ${pwField('rPw2', 'Passwort wiederholen', 'new-password')}
       <p class="form-error" hidden></p>
@@ -1400,13 +1402,14 @@ function renderRegister() {
     const name = document.getElementById('rName').value.trim();
     const pw = document.getElementById('rPw').value;
     const realName = document.getElementById('rReal').value.trim().replace(/\s+/g, ' ');
-    const problem = !name ? 'Bitte einen Benutzernamen eingeben.' : realNameProblem(realName) || passwordProblem(pw, document.getElementById('rPw2').value);
+    const club = document.getElementById('rClub').value.trim().replace(/\s+/g, ' ');
+    const problem = !name ? 'Bitte einen Benutzernamen eingeben.' : realNameProblem(realName) || clubProblem(club) || passwordProblem(pw, document.getElementById('rPw2').value);
     if (problem) return formError(problem);
     if (!navigator.onLine) return formError('Zum Erstellen eines Kontos braucht es eine Internetverbindung.');
     const btn = ev.submitter;
     if (btn) { btn.disabled = true; btn.textContent = 'Wird erstellt …'; }
     try {
-      const res = await Auth.register(name, pw, realName);
+      const res = await Auth.register(name, pw, realName, club);
       if (res.error) {
         if (btn) { btn.disabled = false; btn.textContent = 'Konto erstellen'; }
         return formError(res.error);
@@ -1592,7 +1595,7 @@ function openUsersWindow() {
   const draw = () => {
     const q = norm(adminState.query);
     const list = adminState.users.filter(u =>
-      (!q || norm(u.name + ' ' + (u.realName || '')).includes(q)) &&
+      (!q || norm(u.name + ' ' + (u.realName || '') + ' ' + (u.club || '')).includes(q)) &&
       (adminState.filter === 'all' || (adminState.filter === 'new' && isNewUser(u))
         || (adminState.filter === 'admin' && Auth.isAdmin(u)) || (adminState.filter === 'locked' && u.active === false)))
       .sort((a, b) => isNewUser(b) - isNewUser(a) || a.name.localeCompare(b.name, 'de'));
@@ -1602,7 +1605,8 @@ function openUsersWindow() {
         <button class="user-tile ${u.active === false ? 'locked' : ''} ${isNewUser(u) ? 'waiting' : ''}" data-id="${u.uid}">
           <span class="avatar">${esc(u.name.trim().charAt(0).toUpperCase() || '?')}</span>
           <strong>${esc(u.name)}</strong>
-          <small>${u.realName ? esc(u.realName) : '<span class="tag warn">echter Name fehlt</span>'}</small>
+          <small>${u.realName ? esc(u.realName) : '<span class="tag warn">echter Name fehlt</span>'}
+            · ${u.club ? esc(u.club) : '<span class="tag warn">Verein fehlt</span>'}</small>
           <span class="tags">
             ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
             ${isNewUser(u) ? '<span class="tag new">neu</span>' : ''}
@@ -1640,6 +1644,7 @@ function openCreateUser(fromList) {
       <div class="row">
         <div><label for="cuName">Benutzername</label><input id="cuName" maxlength="40" autocomplete="off" required></div>
         <div><label for="cuReal">Vor- und Nachname</label><input id="cuReal" maxlength="80" autocomplete="off" required></div>
+        <div><label for="cuClub">Verein</label><input id="cuClub" maxlength="80" autocomplete="off" required></div>
         <div>${pwField('cuPw', `Passwort (mind. ${Auth.MIN_PASSWORD} Zeichen)`, 'new-password')}</div>
       </div>
       <p class="muted" style="font-size:14px;margin:8px 0 0">Gib der Person Name und Passwort weiter. Sie kann sich damit sofort anmelden.</p>
@@ -1669,12 +1674,13 @@ function openCreateUser(fromList) {
     const pw = modal.querySelector('#cuPw').value;
     const perms = [...modal.querySelectorAll('[name="cuPerm"]:checked')].map(c => c.value);
     const realName = modal.querySelector('#cuReal').value.trim().replace(/\s+/g, ' ');
-    const problem = !name ? 'Bitte einen Benutzernamen eingeben.' : realNameProblem(realName) || passwordProblem(pw) || (!perms.length ? 'Bitte mindestens ein Recht auswählen.' : '');
+    const club = modal.querySelector('#cuClub').value.trim().replace(/\s+/g, ' ');
+    const problem = !name ? 'Bitte einen Benutzernamen eingeben.' : realNameProblem(realName) || clubProblem(club) || passwordProblem(pw) || (!perms.length ? 'Bitte mindestens ein Recht auswählen.' : '');
     if (problem) return err(problem);
     const btn = ev.submitter;
     if (btn) { btn.disabled = true; btn.textContent = 'Wird erstellt …'; }
     try {
-      await Auth.createMember(name, pw, perms, realName);
+      await Auth.createMember(name, pw, perms, realName, club);
       toast(`Benutzer ${name} erstellt`);
       await loadMembers();
       adminState.query = '';
@@ -1696,7 +1702,8 @@ function openUserDetail(u) {
     <div class="modal-head">
       <button class="icon-btn back" id="backToList" aria-label="Zurück zur Liste">←</button>
       <div class="grow"><h2>${esc(u.name)}</h2>
-        <div class="muted">${u.realName ? esc(u.realName) : '<span class="tag warn">echter Name fehlt</span>'}</div>
+        <div class="muted">${u.realName ? esc(u.realName) : '<span class="tag warn">echter Name fehlt</span>'}
+          · ${u.club ? esc(u.club) : '<span class="tag warn">Verein fehlt</span>'}</div>
         <span class="tags">
           ${u.uid === me.uid ? '<span class="tag">Du</span>' : ''}
           ${Auth.isAdmin(u) ? '<span class="tag">Admin</span>' : ''}
@@ -1713,6 +1720,7 @@ function openUserDetail(u) {
     <div class="action-row">
       ${isNewUser(u) ? '<button class="btn" data-act="known">Ist bekannt</button>' : ''}
       <button class="btn" data-act="real">Vor- und Nachname ${u.realName ? 'ändern' : 'eintragen'}</button>
+      <button class="btn" data-act="club">Verein ${u.club ? 'ändern' : 'eintragen'}</button>
       <button class="btn" data-act="pw">Passwort neu setzen</button>
       ${u.uid !== me.uid ? `
         <button class="btn" data-act="lock">${u.active === false ? 'Entsperren' : 'Sperren'}</button>
@@ -1766,6 +1774,14 @@ function openUserDetail(u) {
     const problem = realNameProblem(realName);
     if (problem) return alert(problem);
     act(() => Auth.updateMember(u, { realName }), `Name von ${u.name} gespeichert`, ev.currentTarget);
+  });
+
+  modal.querySelector('[data-act="club"]').addEventListener('click', ev => {
+    const club = prompt(`Verein von ${u.name}:`, u.club || '')?.trim().replace(/\s+/g, ' ');
+    if (club == null || club === (u.club || '')) return;
+    const problem = clubProblem(club);
+    if (problem) return alert(problem);
+    act(() => Auth.updateMember(u, { club }), `Verein von ${u.name} gespeichert`, ev.currentTarget);
   });
 
   modal.querySelector('[data-act="pw"]').addEventListener('click', ev => {

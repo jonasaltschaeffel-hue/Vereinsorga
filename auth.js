@@ -79,7 +79,7 @@ const Auth = (() => {
     // alte Einträge desselben Benutzers (z. B. nach Umbenennung) entfernen
     for (const [k, v] of Object.entries(c)) if (v.uid === member.uid) delete c[k];
     c[nameKey(member.name)] = { uid: member.uid, name: member.name, perms: member.perms, active: member.active !== false,
-      approved: !!member.approved, realName: member.realName || "", email: member.email, verifier };
+      approved: !!member.approved, realName: member.realName || "", club: member.club || "", email: member.email, verifier };
     localStorage.setItem(LS_CACHE, JSON.stringify(c));
   }
 
@@ -95,7 +95,7 @@ const Auth = (() => {
     const uid = sessionStorage.getItem(UI_KEY) || localStorage.getItem(UI_KEY);
     if (!uid) { current = null; return null; }
     const m = Object.values(cache()).find(x => x.uid === uid && x.active);
-    current = m ? { uid: m.uid, name: m.name, perms: m.perms, active: true, approved: !!m.approved, realName: m.realName || "", email: m.email } : null;
+    current = m ? { uid: m.uid, name: m.name, perms: m.perms, active: true, approved: !!m.approved, realName: m.realName || "", club: m.club || "", email: m.email } : null;
     if (!current) logout();
     return current;
   }
@@ -129,9 +129,9 @@ const Auth = (() => {
     if (!current) return;
     const m = await FB.getDoc('members', current.uid, tok);
     if (!m || m.active === false) { logout(); window.dispatchEvent(new CustomEvent('auth-revoked')); return; }
-    const updated = { ...current, name: m.name, perms: m.perms || [], approved: !!m.approved, realName: m.realName || "" };
+    const updated = { ...current, name: m.name, perms: m.perms || [], approved: !!m.approved, realName: m.realName || "", club: m.club || "" };
     const permsChanged = JSON.stringify(updated.perms) !== JSON.stringify(current.perms) || updated.name !== current.name
-      || updated.approved !== !!current.approved;
+      || updated.approved !== !!current.approved || updated.realName !== current.realName || updated.club !== current.club;
     current = updated;
     await cacheMember(updated);
     const modulesChanged = await refreshModules(tok);
@@ -187,7 +187,7 @@ const Auth = (() => {
         const m = await FB.getDoc('members', s.uid, s.idToken);
         if (!m || m.active === false) return { error: 'Dieses Konto ist gesperrt oder wurde gelöscht.' };
         saveAuth(s);
-        const member = { uid: s.uid, name: m.name, perms: m.perms || [], active: true, approved: !!m.approved, realName: m.realName || "", email: lg.email };
+        const member = { uid: s.uid, name: m.name, perms: m.perms || [], active: true, approved: !!m.approved, realName: m.realName || "", club: m.club || "", email: lg.email };
         await cacheMember(member, password);
         memoryPassword = null;
         startSession(member, persist);
@@ -202,7 +202,7 @@ const Auth = (() => {
       return { error: 'Keine Internetverbindung. Ohne Internet können sich nur Benutzer anmelden, die auf diesem Gerät schon einmal online angemeldet waren.' };
     }
     if (!c.active || await hash(password, c.verifier.salt) !== c.verifier.hash) return { error: 'Name oder Passwort falsch.' };
-    const member = { uid: c.uid, name: c.name, perms: c.perms, active: true, realName: c.realName || "", email: c.email };
+    const member = { uid: c.uid, name: c.name, perms: c.perms, active: true, realName: c.realName || "", club: c.club || "", email: c.email };
     memoryPassword = loadAuth()?.uid === c.uid ? null : password;
     startSession(member, persist);
     return { user: member, offline: true };
@@ -227,7 +227,7 @@ const Auth = (() => {
 
   // ---------- Admin-Funktionen (brauchen Internet) ----------
   // approved: wurde vom Admin schon einmal freigegeben (bleibt gesetzt, auch wenn Rechte später entfernt werden)
-  const memberData = m => ({ name: m.name, perms: m.perms || [], active: m.active !== false, approved: !!m.approved, realName: m.realName || "",
+  const memberData = m => ({ name: m.name, perms: m.perms || [], active: m.active !== false, approved: !!m.approved, realName: m.realName || "", club: m.club || "",
     createdAt: m.createdAt || new Date().toISOString() });
 
   async function listMembers() {
@@ -237,13 +237,13 @@ const Auth = (() => {
 
   // Selbst-Registrierung: neues Konto nur mit dem Recht „einstellungen“ – weitere Rechte gibt ein Admin frei.
   const NEW_USER_PERMS = ['einstellungen'];
-  async function register(name, password, realName) {
+  async function register(name, password, realName, club) {
     if (await FB.getDoc('logins', nameKey(name))) return { error: `Der Name „${name}“ ist schon vergeben.` };
     const email = FB.newEmail();
     const s = await FB.signUp(email, password);
     try {
       await FB.commit([
-        { coll: 'members', id: s.uid, data: memberData({ name, realName, perms: NEW_USER_PERMS }) },
+        { coll: 'members', id: s.uid, data: memberData({ name, realName, club, perms: NEW_USER_PERMS }) },
         { coll: 'logins', id: nameKey(name), data: { email, uid: s.uid, name } },
       ], s.idToken);
     } catch (e) {
@@ -251,19 +251,19 @@ const Auth = (() => {
       throw e;
     }
     saveAuth(s);
-    const member = { uid: s.uid, name, realName, perms: NEW_USER_PERMS, active: true, email };
+    const member = { uid: s.uid, name, realName, club, perms: NEW_USER_PERMS, active: true, email };
     await cacheMember(member, password);
     startSession(member, false);
     return { user: member };
   }
   // Admin legt einen Benutzer selbst an (gilt als freigegeben, wenn echte Rechte vergeben werden)
-  async function createMember(name, password, perms, realName) {
+  async function createMember(name, password, perms, realName, club) {
     const tok = await token();
     if (await FB.getDoc('logins', nameKey(name))) throw new Error(`Der Name „${name}“ ist schon vergeben.`);
     const email = FB.newEmail();
     const s = await FB.signUp(email, password); // Sitzung des neuen Kontos wird nicht verwendet
     await FB.commit([
-      { coll: 'members', id: s.uid, data: memberData({ name, realName, perms, approved: perms.some(p => p !== 'einstellungen') }) },
+      { coll: 'members', id: s.uid, data: memberData({ name, realName, club, perms, approved: perms.some(p => p !== 'einstellungen') }) },
       { coll: 'logins', id: nameKey(name), data: { email, uid: s.uid, name } },
     ], tok);
   }

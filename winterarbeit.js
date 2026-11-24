@@ -40,8 +40,19 @@ const waTaskHours = t => (t.hours || 0) * Math.max(1, waWorkers(t).length);
 // Helfer dürfen eigene Häkchen zurücknehmen, solange die Aufgabe nicht geprüft ist
 const waCanUntick = t => canManageWa() || (Auth.can('winterarbeit') && t.doneUid === Auth.user()?.uid && !t.approvedAt);
 
+// Sichtbarkeit: Verwalter sehen alles; alle anderen nur Objekte, die ihrem Vor- und Nachnamen oder ihrem Verein gehören.
+// shortcut: nur ein Anzeige-Filter – die Daten werden trotzdem aufs Gerät geladen; für eine echte Sperre müssten die Firestore-Regeln pro Objekt prüfen.
+const waVisible = o => {
+  if (canManageWa()) return true;
+  const u = Auth.user() || {};
+  return [u.realName, u.club].some(x => x && norm(x) === norm(o.owner));
+};
+
 async function loadWa() {
-  const [objects, tasks] = await Promise.all([DB.all('waObject'), DB.all('waTask')]);
+  const [all, allTasks] = await Promise.all([DB.all('waObject'), DB.all('waTask')]);
+  const objects = all.filter(waVisible);
+  const ids = new Set(objects.map(o => o.id));
+  const tasks = allTasks.filter(t => ids.has(t.objectId));
   objects.sort((a, b) => WA_ORDER.indexOf(a.kind) - WA_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name, 'de'));
   tasks.sort((a, b) => (b.important ? 1 : 0) - (a.important ? 1 : 0) || (a.order ?? 0) - (b.order ?? 0) || (a.createdAt || '').localeCompare(b.createdAt || ''));
   return { objects, tasks };
@@ -540,7 +551,7 @@ function openWaObjectForm(o, tasks, kind, objects) {
       <input id="woName" required maxlength="60" value="${esc(d.name)}">
       <label for="woIdent">Kennzeichen / Nummer (optional)</label>
       <input id="woIdent" maxlength="30" value="${esc(d.ident || '')}">
-      <label for="woOwner">Gehört zu – Person oder Verein (optional)</label>
+      <label for="woOwner">Gehört zu – Vor- und Nachname oder Verein (leer = nur Verwalter sehen es)</label>
       <input id="woOwner" maxlength="60" list="woOwners" value="${esc(d.owner || '')}" placeholder="z. B. Max Mustermann oder LSV Regensburg" autocomplete="off">
       <datalist id="woOwners">${owners.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
       <label for="woNote">Notiz (optional)</label>
@@ -548,7 +559,7 @@ function openWaObjectForm(o, tasks, kind, objects) {
       ${isNew ? '' : `<label class="check" style="margin-top:12px"><input type="checkbox" id="woArchived" ${d.archived ? 'checked' : ''}> archiviert (wird in der Übersicht nicht mehr gezeigt)</label>`}
       <p class="form-error" hidden></p>
       <div class="modal-actions">
-        ${!isNew && !used ? '<button class="btn danger" type="button" id="woDel">Löschen</button>' : ''}
+        ${!isNew ? '<button class="btn danger" type="button" id="woDel">Löschen</button>' : ''}
         <span class="grow"></span>
         <button class="btn" type="button" data-close>Abbrechen</button>
         <button class="btn primary" type="submit">${isNew ? 'Anlegen' : 'Speichern'}</button></div>
@@ -561,10 +572,12 @@ function openWaObjectForm(o, tasks, kind, objects) {
   modal.querySelectorAll('input[name="woKind"]').forEach(r => r.addEventListener('change', setPh));
   $('woName').focus();
   $('woDel')?.addEventListener('click', async () => {
-    if (!confirm(`„${d.name}“ löschen?`)) return;
+    if (!confirm(`„${d.name}“ löschen?${used ? `\nDabei werden auch ${used} ${used === 1 ? 'Aufgabe' : 'Aufgaben'} mit Unterschriften gelöscht.` : ''}`)) return;
+    for (const t of tasks.filter(x => x.objectId === o.id)) await DB.remove(t);
     await DB.remove(o);
     closeModal();
     toast(`${d.name} gelöscht`);
+    location.hash = '#/winterarbeit';
     renderWinterarbeit();
   });
   $('waObjForm').addEventListener('submit', async ev => {
