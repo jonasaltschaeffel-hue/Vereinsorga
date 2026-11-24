@@ -5,7 +5,7 @@
 // Rechte: „winterarbeit“ (ansehen, Aufgaben abhaken & unterschreiben),
 //         „winterarbeit_verwalten“ (Objekte & Aufgaben anlegen, prüfen, alles bearbeiten).
 //
-// waObject {name, kind: 'flugzeug'|'fahrzeug'|'infrastruktur', ident, note, archived}
+// waObject {name, kind: 'flugzeug'|'fahrzeug'|'infrastruktur', ident, owner (Person oder Verein), note, archived}
 // waTask   {objectId, objectName, objectKind, season, title, details, important, order,
 //           status: 'offen'|'erledigt', workers, hours (je Person), doneNote, signature, doneAt, doneUid,
 //           approvedBy, approvedSig, approvedAt}
@@ -32,6 +32,8 @@ const waSeasonOf = d => {
   const start = m >= 7 ? y : y - 1;
   return `${start}/${String(start + 1).slice(2)}`;
 };
+// Anleitung zu einer Aufgabe, aufklappbar
+const waGuide = (t, open) => t.details ? `<details class="wa-guide" ${open ? 'open' : ''}><summary>📖 Anleitung</summary><div>${esc(t.details)}</div></details>` : '';
 const waObjLabel = o => `${o.name}${o.ident ? ` · ${o.ident}` : ''}`;
 const waWorkers = t => String(t.workers || '').split(/\s*(?:,|;|\bund\b|&|\+)\s*/i).map(s => s.trim()).filter(Boolean);
 const waTaskHours = t => (t.hours || 0) * Math.max(1, waWorkers(t).length);
@@ -121,8 +123,8 @@ async function renderWinterarbeit() {
       draw();
     });
     body.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => { location.hash = '#/winterarbeit/' + el.dataset.open; }));
-    body.querySelectorAll('[data-obj]').forEach(el => el.addEventListener('click', () => openWaObjectForm(objects.find(o => o.id === el.dataset.obj), tasks)));
-    body.querySelectorAll('[data-newobj]').forEach(el => el.addEventListener('click', () => openWaObjectForm(null, tasks, el.dataset.newobj)));
+    body.querySelectorAll('[data-obj]').forEach(el => el.addEventListener('click', () => openWaObjectForm(objects.find(o => o.id === el.dataset.obj), tasks, null, objects)));
+    body.querySelectorAll('[data-newobj]').forEach(el => el.addEventListener('click', () => openWaObjectForm(null, tasks, el.dataset.newobj, objects)));
     body.querySelectorAll('[data-task]').forEach(el => el.addEventListener('click', () => openWaTask(tasks.find(t => t.id === el.dataset.task))));
   };
 
@@ -167,7 +169,7 @@ function waObjectGridHtml(objects, shown) {
       const important = ts.filter(t => t.status !== 'erledigt' && t.important).length;
       return `<button class="wa-obj-card kind-${o.kind}" data-open="${o.id}">
         <span class="wa-obj-icon">${WA_KINDS[o.kind]?.emoji || '🔧'}</span>
-        <span class="wa-obj-name"><strong>${esc(o.name)}</strong>${o.ident ? `<small>${esc(o.ident)}</small>` : ''}</span>
+        <span class="wa-obj-name"><strong>${esc(o.name)}</strong>${o.ident ? `<small>${esc(o.ident)}</small>` : ''}${o.owner ? `<small>👤 ${esc(o.owner)}</small>` : ''}</span>
         ${waProgress(done, ts.length)}
         <span class="wa-obj-foot">
           ${ts.length ? (open ? `<span><b>${open}</b> offen</span>` : '<span class="wa-alldone">✔ alles erledigt</span>') : '<span class="muted">keine Aufgaben</span>'}
@@ -220,6 +222,7 @@ function waManageHtml(objects, tasks) {
         return `<li class="wa-row ${o.archived ? 'archived' : ''}" data-obj="${o.id}" role="button" tabindex="0">
           <span class="grow"><strong>${esc(o.name)}</strong>${o.ident ? ` <span class="muted">· ${esc(o.ident)}</span>` : ''}
             ${o.archived ? ' <span class="tag">archiviert</span>' : ''}
+            ${o.owner ? `<small class="muted" style="display:block">👤 ${esc(o.owner)}</small>` : ''}
             ${o.note ? `<small class="muted" style="display:block">${esc(o.note)}</small>` : ''}</span>
           <span class="muted">${n} ${n === 1 ? 'Aufgabe' : 'Aufgaben'}</span><span class="muted">✎</span></li>`;
       }).join('')}</ul>` : '<p class="muted" style="margin:0">Noch nichts angelegt.</p>'}
@@ -250,6 +253,7 @@ async function renderWaObject(id) {
       <div class="grow">
         <div class="wa-hero-kicker">${k.one} · Saison ${esc(waState.season)}</div>
         <h2>${esc(o.name)}${o.ident ? ` <small>${esc(o.ident)}</small>` : ''}</h2>
+        ${o.owner ? `<p class="muted" style="margin:2px 0 0">👤 ${esc(o.owner)}</p>` : ''}
         ${o.note ? `<p class="muted" style="margin:2px 0 0">${esc(o.note)}</p>` : ''}
       </div>
       <button class="btn small" id="waPrintObj">🖨 Drucken</button>
@@ -303,7 +307,7 @@ async function renderWaObject(id) {
     else if (canTickWa()) openWaTick(t);
     else toast('Dafür fehlt dir die Berechtigung');
   }));
-  view.querySelectorAll('.wa-task').forEach(li => li.addEventListener('click', () => openWaTask(tasks.find(x => x.id === li.dataset.id))));
+  view.querySelectorAll('.wa-task').forEach(li => li.addEventListener('click', ev => !ev.target.closest('.wa-guide') && openWaTask(tasks.find(x => x.id === li.dataset.id))));
   document.getElementById('waPrintObj').addEventListener('click', () => {
     if (!mine.length) return toast('Keine Aufgaben zum Drucken');
     printWa(mine, objects, '');
@@ -320,7 +324,7 @@ function waTaskLi(t) {
     <button class="wa-check" data-check="${t.id}" aria-label="${done ? 'Erledigt – Details' : 'Als erledigt abhaken'}">${done ? '✓' : ''}</button>
     <span class="grow">
       <span class="wa-task-title">${esc(t.title)}${t.important && !done ? ' <span class="wa-imp">wichtig</span>' : ''}${t.season !== waState.season ? ` <span class="tag">aus ${esc(t.season)}</span>` : ''}</span>
-      ${t.details ? `<span class="wa-task-details">${esc(t.details)}</span>` : ''}
+      ${waGuide(t)}
       ${done ? `<span class="wa-task-meta">✔ ${esc(t.workers)} · ${waDay(t.doneAt)}${t.hours ? ` · ${waHours(t.hours)} h${waWorkers(t).length > 1 ? ' je Person' : ''}` : ''}
         ${t.approvedAt ? `<span class="tag ok">geprüft · ${esc(t.approvedBy)}</span>` : canManageWa() ? '<span class="tag new">zu prüfen</span>' : ''}</span>
         ${t.doneNote ? `<span class="wa-task-details">„${esc(t.doneNote)}“</span>` : ''}` : ''}
@@ -364,11 +368,11 @@ function openWaTick(t) {
       <div class="muted">${WA_KINDS[t.objectKind]?.emoji || ''} ${esc(t.objectName)}</div></div>
       <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
     <div class="wa-tick-title">${esc(t.title)}</div>
-    ${t.details ? `<p class="muted" style="margin:4px 0 0">${esc(t.details)}</p>` : ''}
+    ${waGuide(t, true)}
     <form id="waTickForm" class="ev-form">
       <div class="row">
         <div><label for="wtWorkers">Erledigt von</label>
-          <input id="wtWorkers" required maxlength="120" value="${esc(Auth.user()?.name || '')}" autocomplete="off"></div>
+          <input id="wtWorkers" required maxlength="120" value="${esc(Auth.user()?.realName || Auth.user()?.name || '')}" autocomplete="off"></div>
         <div class="shrink" style="width:130px"><label for="wtHours">Stunden</label>
           <input id="wtHours" inputmode="decimal" placeholder="z. B. 2,5"></div>
       </div>
@@ -413,7 +417,7 @@ function openWaTask(t) {
     <div class="modal-head"><div class="grow"><h2>${esc(t.title)}</h2>
       <div class="muted">${WA_KINDS[t.objectKind]?.emoji || ''} ${esc(t.objectName)} · Saison ${esc(t.season)}</div></div>
       <button class="icon-btn" data-close aria-label="Schließen">✕</button></div>
-    ${t.details ? `<p style="margin:6px 0 0">${esc(t.details)}</p>` : ''}
+    ${waGuide(t, true)}
     <dl class="wa-detail">
       <dt>Erledigt von</dt><dd>${esc(t.workers)}</dd>
       <dt>Am</dt><dd>${new Date(t.doneAt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</dd>
@@ -482,8 +486,8 @@ function openWaTaskForm(t) {
       <form id="waTaskForm" class="ev-form">
         <label for="wfTitle">Aufgabe</label>
         <input id="wfTitle" required maxlength="120" value="${esc(t.title)}">
-        <label for="wfDetails">Genauere Beschreibung (optional)</label>
-        <textarea id="wfDetails" rows="3" maxlength="1000" placeholder="z. B. Werkzeug liegt im Schrank links">${esc(t.details || '')}</textarea>
+        <label for="wfDetails">Anleitung (optional)</label>
+        <textarea id="wfDetails" rows="6" maxlength="4000" placeholder="Schritt für Schritt, z. B.&#10;1. Haube abnehmen&#10;2. Mit Plexiglas-Reiniger und weichem Tuch reinigen&#10;Werkzeug liegt im Schrank links">${esc(t.details || '')}</textarea>
         <label for="wfObj">Objekt</label>
         <select id="wfObj">${objects.map(o => `<option value="${o.id}" ${o.id === t.objectId ? 'selected' : ''}>${WA_KINDS[o.kind]?.emoji || ''} ${esc(waObjLabel(o))}</option>`).join('')}</select>
         <label class="check" style="margin-top:12px"><input type="checkbox" id="wfImp" ${t.important ? 'checked' : ''}> ❗ wichtig (steht oben)</label>
@@ -520,7 +524,8 @@ function openWaTaskForm(t) {
 }
 
 // ---------- Objekt anlegen / bearbeiten ----------
-function openWaObjectForm(o, tasks, kind) {
+function openWaObjectForm(o, tasks, kind, objects) {
+  const owners = [...new Set(objects.map(x => x.owner).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
   const isNew = !o;
   const d = o || { name: '', kind: kind || 'flugzeug', ident: '', note: '', archived: false };
   const used = o ? tasks.filter(t => t.objectId === o.id).length : 0;
@@ -535,6 +540,9 @@ function openWaObjectForm(o, tasks, kind) {
       <input id="woName" required maxlength="60" value="${esc(d.name)}">
       <label for="woIdent">Kennzeichen / Nummer (optional)</label>
       <input id="woIdent" maxlength="30" value="${esc(d.ident || '')}">
+      <label for="woOwner">Gehört zu – Person oder Verein (optional)</label>
+      <input id="woOwner" maxlength="60" list="woOwners" value="${esc(d.owner || '')}" placeholder="z. B. Max Mustermann oder LSV Regensburg" autocomplete="off">
+      <datalist id="woOwners">${owners.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
       <label for="woNote">Notiz (optional)</label>
       <input id="woNote" maxlength="120" value="${esc(d.note || '')}" placeholder="z. B. Jahresnachprüfung im Februar">
       ${isNew ? '' : `<label class="check" style="margin-top:12px"><input type="checkbox" id="woArchived" ${d.archived ? 'checked' : ''}> archiviert (wird in der Übersicht nicht mehr gezeigt)</label>`}
@@ -564,7 +572,7 @@ function openWaObjectForm(o, tasks, kind) {
     const name = $('woName').value.trim();
     if (!name) { const e = modal.querySelector('.form-error'); e.textContent = 'Bitte eine Bezeichnung eingeben.'; e.hidden = false; return; }
     const rec = await DB.save('waObject', { ...(o || {}), name, kind: kindNow(), ident: $('woIdent').value.trim(),
-      note: $('woNote').value.trim(), archived: $('woArchived')?.checked || false });
+      owner: $('woOwner').value.trim(), note: $('woNote').value.trim(), archived: $('woArchived')?.checked || false });
     // Name in den Aufgaben mitziehen, damit Listen und Druck stimmen
     if (o && (o.name !== rec.name || o.kind !== rec.kind)) {
       for (const t of tasks.filter(x => x.objectId === o.id)) await DB.save('waTask', { ...t, objectName: rec.name, objectKind: rec.kind });
@@ -642,7 +650,7 @@ const sigBox = (id, label) => `
 // ---------- Excel ----------
 function waCsv(list) {
   downloadCsv(`winterarbeit_${waState.season.replace('/', '-')}.csv`,
-    ['Bereich', 'Objekt', 'Aufgabe', 'Beschreibung', 'Wichtig', 'Status', 'Erledigt von', 'Stunden je Person', 'Stunden gesamt', 'Erledigt am', 'Bemerkung', 'Geprüft von', 'Geprüft am'],
+    ['Bereich', 'Objekt', 'Aufgabe', 'Anleitung', 'Wichtig', 'Status', 'Erledigt von', 'Stunden je Person', 'Stunden gesamt', 'Erledigt am', 'Bemerkung', 'Geprüft von', 'Geprüft am'],
     list.slice().sort((a, b) => WA_ORDER.indexOf(a.objectKind) - WA_ORDER.indexOf(b.objectKind) || a.objectName.localeCompare(b.objectName, 'de'))
       .map(t => [WA_KINDS[t.objectKind]?.one || '', t.objectName, t.title, t.details || '', t.important ? 'ja' : '', t.status === 'erledigt' ? 'erledigt' : 'offen',
         t.workers || '', t.hours || 0, waTaskHours(t), waDay(t.doneAt), t.doneNote || '', t.approvedBy || '', waDay(t.approvedAt)]));
@@ -666,7 +674,7 @@ function printWa(list, objects, subtitle) {
       <p>${done} von ${list.length} Aufgaben erledigt · ${waHours(list.reduce((s, t) => s + (t.status === 'erledigt' ? waTaskHours(t) : 0), 0))} Stunden</p>
       ${sorted.map(g => {
         const items = g.list.slice().sort((a, b) => (a.status === 'erledigt') - (b.status === 'erledigt') || (b.important ? 1 : 0) - (a.important ? 1 : 0) || (a.order ?? 0) - (b.order ?? 0));
-        return `<h2>${WA_KINDS[g.o.kind]?.one || ''}: ${esc(waObjLabel(g.o))}</h2>
+        return `<h2>${WA_KINDS[g.o.kind]?.one || ''}: ${esc(waObjLabel(g.o))}${g.o.owner ? ` (${esc(g.o.owner)})` : ''}</h2>
         <table>
           <thead><tr><th class="box"></th><th>Aufgabe</th><th>Erledigt von</th><th class="num">Std.</th><th>Datum</th><th>Unterschrift</th><th>Geprüft</th></tr></thead>
           <tbody>${items.map(t => `<tr>

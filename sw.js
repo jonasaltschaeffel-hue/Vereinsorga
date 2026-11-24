@@ -1,6 +1,6 @@
 // Service Worker: speichert die App-Dateien, damit sie offline startet.
 // Bei jeder Änderung an den Dateien VERSION erhöhen, damit Geräte das Update laden.
-const VERSION = 'v24';
+const VERSION = 'v25';
 const CACHE = 'vereinsorga-' + VERSION;
 const FILES = [
   './', 'index.html', 'styles.css', 'db.js', 'import.js', 'firebase.js', 'auth.js', 'sync.js', 'calendar.js', 'bayairn.js', 'cocktails.js', 'einkauf.js', 'winterarbeit.js', 'app.js',

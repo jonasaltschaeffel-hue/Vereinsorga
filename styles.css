@@ -685,7 +685,11 @@ body.kiosk-mode main { max-width: 1400px; padding-top: calc(12px + env(safe-area
 }
 .wa-obj-icon.big { width: 58px; height: 58px; font-size: 32px; border-radius: 16px; flex: 0 0 auto; }
 .wa-obj-name strong { display: block; font-size: 17px; }
-.wa-obj-name small { color: var(--muted); font-size: 13px; }
+.wa-obj-name small { display: block; color: var(--muted); font-size: 13px; }
+.wa-guide { margin-top: 6px; font-size: 14px; }
+.wa-guide summary { cursor: pointer; color: var(--primary); font-weight: 600; width: max-content; }
+.wa-guide div { white-space: pre-line; margin-top: 6px; padding: 10px 12px; border-radius: 10px; overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--primary) 7%, var(--card)); border-left: 3px solid var(--primary); }
 .wa-obj-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 14px; }
 .wa-alldone { color: var(--ok); font-weight: 600; }
 .wa-imp-badge { color: var(--danger); font-size: 13px; font-weight: 600; }
@@ -723,7 +727,8 @@ body.kiosk-mode main { max-width: 1400px; padding-top: calc(12px + env(safe-area
 .wa-add { display: flex; gap: 8px; align-items: center; }
 .wa-add input[type=text], .wa-add #waAddTitle { flex: 1; min-width: 0; }
 .wa-imp-toggle { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: var(--card); color: var(--text); white-space: nowrap; }
-.wa-imp-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.wa-imp-toggle { position: relative; }
+.wa-imp-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .wa-imp-toggle { font-size: 14px; opacity: .7; }
 .wa-imp-toggle:has(input:checked) { opacity: 1; color: var(--danger); font-weight: 600; }
 .wa-imp-toggle:has(input:focus-visible) { outline: 2px solid var(--primary); }
